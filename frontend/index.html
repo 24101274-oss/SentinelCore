@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <title>SentinelCore | Consola del laboratorio</title>
+    <link rel="stylesheet" href="./dashboard.css">
+    <script src="./dashboard.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="shell topbar-inner">
+        <a class="brand" href="./">Sentinel<span>Core</span></a>
+        <div class="connection">
+          <span id="connection-state" class="connection-state" data-state="offline">Desconectado</span>
+          <button id="disconnect" class="button button-secondary" type="button" hidden>Desconectar</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="shell main">
+      <section id="access" class="panel access" aria-labelledby="access-title">
+        <h1 id="access-title">Consola del laboratorio</h1>
+        <p>Conéctate con el <code>ADMIN_TOKEN</code> configurado para esta instancia de SentinelCore.</p>
+        <form id="connect-form" method="post">
+          <label for="token">Token de administrador</label>
+          <div class="form-actions">
+            <input id="token" name="token" type="password" required autocomplete="off" spellcheck="false" aria-describedby="connect-error">
+            <button id="connect" class="button button-primary" type="submit">Conectar</button>
+          </div>
+          <p id="connect-error" class="error" role="alert" hidden></p>
+        </form>
+      </section>
+
+      <section id="workspace" aria-labelledby="workspace-title" hidden>
+        <div class="workspace-heading">
+          <div>
+            <h1 id="workspace-title" tabindex="-1">Consola del laboratorio</h1>
+            <p class="last-update">Última actualización <time id="updated">—</time></p>
+          </div>
+          <button id="refresh" class="button button-secondary" type="button">Actualizar</button>
+        </div>
+        <p id="refresh-error" class="error banner" role="alert" hidden></p>
+
+        <dl class="metrics" aria-label="Métricas del laboratorio">
+          <div class="panel metric"><dt>Eventos</dt><dd id="metric-events">—</dd></div>
+          <div class="panel metric"><dt>Incidentes</dt><dd id="metric-incidents">—</dd></div>
+          <div class="panel metric"><dt>Alertas</dt><dd id="metric-alerts">—</dd></div>
+          <div class="panel metric"><dt>Bloqueos verificados</dt><dd id="metric-verified-blocks">—</dd></div>
+        </dl>
+
+        <div class="workspace-grid">
+          <section class="panel incidents" aria-labelledby="incidents-title">
+            <div class="panel-heading">
+              <h2 id="incidents-title">Incidentes</h2>
+              <span id="incident-count" class="hint"></span>
+            </div>
+            <p id="incident-empty" class="empty">Todavía no se han registrado incidentes.</p>
+            <div id="incident-table" class="table-scroll" hidden>
+              <table aria-label="Incidentes registrados">
+                <thead><tr><th scope="col">Incidente</th><th scope="col">Origen</th><th scope="col">Riesgo</th><th scope="col">Fallos</th></tr></thead>
+                <tbody id="incident-rows"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="panel evidence" aria-labelledby="evidence-title">
+            <div class="panel-heading"><h2 id="evidence-title" tabindex="-1">Evidencia del incidente</h2></div>
+            <p id="evidence-state" class="empty" role="status">Selecciona un incidente para consultar sus eventos.</p>
+            <div id="evidence-content" class="evidence-content" hidden></div>
+          </section>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

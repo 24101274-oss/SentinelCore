@@ -1,0 +1,14 @@
+*
+!requirements.txt
+!backend/
+!backend/**
+!frontend/
+!frontend/**
+!protected_app/
+!protected_app/**
+!monitoring/
+!monitoring/**
+!lab/
+!lab/**
+**/__pycache__/
+**/*.pyc

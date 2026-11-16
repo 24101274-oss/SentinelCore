@@ -1,0 +1,75 @@
+name: sentinelcore
+
+x-healthcheck: &healthcheck
+  test: [CMD, python, '-c', "from http.client import HTTPConnection; c = HTTPConnection('127.0.0.1', 8000, timeout=2); c.request('GET', '/health'); raise SystemExit(c.getresponse().status != 200)"]
+  interval: 3s
+  timeout: 3s
+  retries: 10
+
+services:
+  backend:
+    build: .
+    command: [python, -m, uvicorn, 'backend.main:app', --host, '0.0.0.0', --port, '8000', --no-proxy-headers]
+    environment:
+      INGEST_TOKEN: ${INGEST_TOKEN:?Genera INGEST_TOKEN en .env}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?Genera ADMIN_TOKEN en .env}
+      DATABASE_URL: sqlite:////app/data/sentinelcore.db
+      MEDIUM_THRESHOLD: ${MEDIUM_THRESHOLD:-3}
+      HIGH_THRESHOLD: ${HIGH_THRESHOLD:-5}
+      WINDOW_SECONDS: ${WINDOW_SECONDS:-60}
+      LAB_CIDRS: ${LAB_CIDRS:-10.231.37.0/28}
+      ALLOWLIST: ${ALLOWLIST:-10.231.37.1,10.231.37.2,10.231.37.3}
+    volumes:
+      - data:/app/data
+    ports:
+      - '127.0.0.1:8000:8000'
+    networks:
+      panel: {}
+      lab:
+        ipv4_address: 10.231.37.2
+    healthcheck: *healthcheck
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+  protected-app:
+    build: .
+    command: [python, -m, uvicorn, 'protected_app.main:app', --host, '0.0.0.0', --port, '8000', --no-proxy-headers]
+    environment:
+      LAB_USERNAME: ${LAB_USERNAME:-admin}
+      LAB_PASSWORD: ${LAB_PASSWORD:?Genera LAB_PASSWORD en .env}
+      INGEST_TOKEN: ${INGEST_TOKEN:?Genera INGEST_TOKEN en .env}
+      BACKEND_URL: http://backend:8000
+    networks:
+      lab:
+        ipv4_address: 10.231.37.3
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck: *healthcheck
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+  demo:
+    build: .
+    command: [python, -m, lab.demo, --docker]
+    profiles: [demo]
+    networks:
+      lab:
+        ipv4_address: 10.231.37.4
+    depends_on:
+      protected-app:
+        condition: service_healthy
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+
+networks:
+  panel: {}
+  lab:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.231.37.0/28
+          gateway: 10.231.37.1
+
+volumes:
+  data:
