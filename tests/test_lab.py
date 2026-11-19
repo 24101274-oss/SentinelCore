@@ -56,6 +56,7 @@ class LabIntegrationTest(unittest.TestCase):
             "WINDOW_SECONDS": "60",
             "MEDIUM_THRESHOLD": "3",
             "HIGH_THRESHOLD": "5",
+            "AI_ENABLED": "false",
         }
         cls.backend = cls.start("backend.main:app", 18060)
         cls.protected = cls.start("protected_app.main:app", 18061)

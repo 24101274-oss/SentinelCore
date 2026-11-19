@@ -3,7 +3,7 @@ from secrets import compare_digest
 from typing import Annotated
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 from sqlalchemy import func, select, text
@@ -21,6 +21,7 @@ from backend.api.schemas import (
     Severity,
 )
 from backend.containment import expire_blocks, find_active_block, record_audit, utc_now
+from backend.analyst import run_analyst
 from backend.detection import correlate
 from backend.models import AuditEntry, Block, Incident, SecurityEvent
 
@@ -87,6 +88,7 @@ def ingest_event(
     payload: EventPayload,
     request: Request,
     session: DatabaseSession,
+    background: BackgroundTasks,
     idempotency_key: Annotated[UUID | None, Header()] = None,
 ) -> EventReceipt:
     event_id = str(idempotency_key or uuid4())
@@ -113,6 +115,9 @@ def ingest_event(
         incident_id=event.receipt_incident_id,
     )
     session.commit()
+    settings = request.app.state.settings
+    if settings.ai_enabled and receipt.incident_id:
+        background.add_task(run_analyst, request.app.state.engine, receipt.incident_id, settings)
     return receipt
 
 
