@@ -6,7 +6,7 @@ La última ejecución de `python -m unittest discover -s tests -v` terminó con 
 
 Se comprobaron autenticación, permisos de tokens, idempotencia, ventanas, excepciones, rechazo HTTP 403 ante credenciales correctas cuando existe bloqueo, liberación manual, expiración y evidencia de recuperación. También pasaron migración repetible desde tablas antiguas, respuestas de IA malformadas, fallback ante fallos, límite de bloqueos y recuperación de decisiones interrumpidas.
 
-Los casos de IA usan respuestas controladas de prueba. La clave configurada respondió HTTP 200 a la consulta real de modelos y el modelo seleccionado está disponible. Las decisiones reales del proveedor siguen pendientes de comprobación.
+Los casos de IA de la suite usan respuestas controladas de prueba. La clave configurada respondió HTTP 200 a la consulta real de modelos y el modelo seleccionado está disponible. Posteriormente se comprobaron decisiones reales de Groq para ambos patrones mediante el flujo HTTP y el dashboard, como se detalla abajo.
 
 ## Ejecución original con reglas
 
@@ -31,10 +31,23 @@ Se observaron cinco respuestas HTTP 401 y después HTTP 403. Desde el botón **D
 
 La comprobación adicional de espera se ejecutó por loopback, que está exceptuado de bloqueo. El portal envió ocho intentos, consultó acceso quince veces y mostró HTTP 200 al terminar la espera. Los controles volvieron a habilitarse y no se registraron errores de consola. Ambos servicios temporales se detuvieron al finalizar.
 
+## Ejecución real con Groq
+
+Se verificó el modelo `openai/gpt-oss-20b` con IA y contención automática activadas, ventana de cinco segundos y bloqueos de cuarenta segundos. Edge accedió a la aplicación mediante la IPv4 LAN real de la misma PC, autorizada como cliente en la configuración temporal de esta prueba. El registro está en `data/evidence/groq-validacion.json`.
+
+| Patrón | Eventos registrados | Decisión de Groq | Confianza declarada por el modelo |
+| --- | --- | --- | --- |
+| Intentos repetidos, `possible_brute_force` | 8 | `block` | 0,95 |
+| Varios usuarios, `possible_password_spraying` | 7 | `block` | 0,90 |
+
+La auditoría registra `ai_decision` y `block_created` con actor `ai`, junto con la explicación de cada decisión. El servicio protegido confirmó después el rechazo HTTP 403 mediante `block_verified`. Se verificaron la liberación manual, el acceso posterior HTTP 200 y la descarga de evidencia JSON desde el botón del dashboard. Los valores de confianza son las puntuaciones declaradas por el modelo para estas dos decisiones.
+
+Las explicaciones de Groq se refieren a cinco fallos, correspondientes al resumen disponible al iniciar cada análisis. Mientras llegaba la respuesta se incorporaron más eventos al incidente, hasta los ocho y siete que figuran en las exportaciones. La explicación conserva la base de la decisión y el incidente muestra el total observado posteriormente.
+
 ## Inicio de la presentación
 
 Se ejecutó el iniciador LAN con detección de la subred real, contención automática activa y acceso HTTP 200. Se verificó el cierre de los dos servicios. La PC y el gateway se agregan a las excepciones de esa ejecución.
 
 También se verificó `--presentation` con una base nueva por sesión, contadores iniciales en cero y conservación del historial anterior. `Iniciar-Presentacion.cmd` usa una ventana de 60 segundos y `--block-seconds 60`.
 
-Quedan por comprobar en el lugar de presentación la conexión desde el segundo dispositivo y los permisos de red de Windows. Las dos ejecuciones de navegador de este registro se realizaron desde la misma PC. Docker Compose se entrega configurado y su ejecución queda pendiente de un motor Docker disponible.
+Quedan por comprobar en el lugar de presentación la conexión desde el segundo dispositivo y los permisos de red de Windows. Las ejecuciones de navegador de este registro se realizaron desde la misma PC. Docker Compose se entrega configurado y su ejecución queda pendiente de un motor Docker disponible.
