@@ -9,6 +9,7 @@ import subprocess
 import sys
 import time
 from http.client import HTTPConnection
+from datetime import datetime
 from ipaddress import IPv4Address, ip_network
 from pathlib import Path
 
@@ -128,6 +129,7 @@ def main() -> int:
     parser.add_argument("--lan", action="store_true", help="Expone el laboratorio a otro dispositivo de la misma red.")
     parser.add_argument("--host-ip", help="Elige la IPv4 de la PC cuando hay varias interfaces LAN.")
     parser.add_argument("--block-seconds", type=int, default=None, help="Duración del bloqueo para esta ejecución.")
+    parser.add_argument("--presentation", action="store_true", help="Abre una sesión nueva con base de datos propia.")
     args = parser.parse_args()
     env_file = initialize_environment()
     if args.init_only:
@@ -136,6 +138,13 @@ def main() -> int:
     children = []
     try:
         environment = {}
+        if args.presentation:
+            session_id = datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(3)
+            session_path = ROOT / "data" / "sessions" / session_id / "sentinelcore.db"
+            session_path.parent.mkdir(parents=True, exist_ok=False)
+            environment["DATABASE_URL"] = "sqlite:///" + session_path.as_posix()
+            print(f"Sesión de presentación: {session_id}", flush=True)
+            print(f"Evidencia de esta sesión: {session_path}", flush=True)
         public_url = "http://127.0.0.1:8001"
         if args.block_seconds is not None:
             if not 5 <= args.block_seconds <= 3600:
@@ -167,6 +176,7 @@ def main() -> int:
         print("Panel: http://127.0.0.1:8000/dashboard/", flush=True)
         print("Usa el valor ADMIN_TOKEN de .env para conectar el panel.", flush=True)
         print(f"Aplicación protegida: {public_url}/", flush=True)
+        print("En el panel verifica Análisis y Contención automática antes de comenzar.", flush=True)
         print("Detén los servicios con Ctrl+C.", flush=True)
         while all(child.poll() is None for child in children):
             time.sleep(0.25)

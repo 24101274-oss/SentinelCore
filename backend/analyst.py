@@ -7,8 +7,10 @@ import math
 from threading import Event
 from datetime import timedelta
 from dataclasses import dataclass
+from typing import Literal
 from urllib.parse import urlsplit
 
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import or_, select, text
 from sqlalchemy.orm import Session
 
@@ -39,6 +41,17 @@ class Decision:
 
 class AnalystError(Exception):
     """La IA no respondió o su respuesta no es válida."""
+
+
+class AnalystFacts(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    category: Literal["possible_brute_force", "possible_password_spraying"]
+    failed_attempts: int = Field(ge=0)
+    event_count: int = Field(ge=0)
+    window_seconds: float = Field(gt=0, allow_inf_nan=False)
+    seconds_between_first_and_last: float = Field(ge=0, allow_inf_nan=False)
+    distinct_usernames: int = Field(ge=0)
 
 
 def parse_decision(raw: bytes) -> Decision:
@@ -72,6 +85,10 @@ def parse_decision(raw: bytes) -> Decision:
 
 
 def ask_model(facts: dict, settings: Settings) -> Decision:
+    try:
+        aggregates = AnalystFacts.model_validate(facts).model_dump(mode="json")
+    except ValidationError as error:
+        raise AnalystError("Los datos del analista deben ser agregados numéricos y una categoría permitida") from error
     url = urlsplit(settings.ai_base_url)
     if url.scheme != "https" or not url.hostname:
         raise AnalystError("AI_BASE_URL debe ser una URL https")
@@ -82,7 +99,7 @@ def ask_model(facts: dict, settings: Settings) -> Decision:
         "response_format": {"type": "json_object"},
         "messages": [
             {"role": "system", "content": SYSTEM},
-            {"role": "user", "content": json.dumps(facts)},
+            {"role": "user", "content": json.dumps(aggregates)},
         ],
     })
     headers = {

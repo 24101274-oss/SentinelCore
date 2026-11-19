@@ -10,6 +10,8 @@ Conecta la PC y el celular u otra PC a la misma Wi-Fi. Ejecuta Iniciar-LAN.cmd o
 .\.venv\Scripts\python.exe -m lab.local --lan --block-seconds 60
 ```
 
+Para exponer, ejecuta `Iniciar-Presentacion.cmd`. Crea una base propia en `data/sessions/` por cada arranque. La consola imprime el identificador y la ruta de la evidencia. También puedes usar `--presentation` con el comando anterior.
+
 El inicio detecta la IPv4 y la máscara de red, limita la candidatura a bloqueo a esa subred y exceptúa la PC y su gateway. Conserva .env. Si hay varias interfaces, selecciona la dirección de Wi-Fi con --host-ip TU_IP_LOCAL. La consola muestra la dirección que debes abrir en el segundo dispositivo.
 
 1. En la PC abre [el dashboard](http://127.0.0.1:8000/dashboard/) y conéctalo con ADMIN_TOKEN de .env.
@@ -17,6 +19,7 @@ El inicio detecta la IPv4 y la máscara de red, limita la candidatura a bloqueo 
 3. Pulsa la prueba de intentos repetidos. El navegador envía hasta ocho solicitudes de login con contraseña inválida. Tres fallos generan alerta y cinco elevan el riesgo.
 4. Una solicitud posterior recibe HTTP 403. El dashboard muestra el bloqueo con evidencia de rechazo y auditoría.
 5. En el dashboard pulsa **Restaurar acceso** y confirma. En el segundo dispositivo pulsa **Probar acceso**. HTTP 200 confirma la recuperación.
+   En el detalle del incidente puedes pulsar **Descargar evidencia** para guardar un JSON con los eventos, bloqueos y auditoría vinculados. Sus parámetros públicos corresponden a la configuración actual de exportación.
 6. Para un segundo escenario elige **Probar varios usuarios**. El motor distingue password spraying cuando observa cinco usuarios distintos y pocos fallos por usuario. Para una ejecución limpia espera que termine la ventana de 60 segundos del primer escenario.
 7. También puedes dejar vencer el bloqueo de 60 segundos y pulsar **Probar acceso** para comprobar la recuperación automática.
 

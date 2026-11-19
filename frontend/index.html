@@ -80,7 +80,11 @@
           </section>
 
           <section class="panel evidence" aria-labelledby="evidence-title">
-            <div class="panel-heading"><h2 id="evidence-title" tabindex="-1">Evidencia del incidente</h2></div>
+            <div class="panel-heading evidence-heading">
+              <h2 id="evidence-title" tabindex="-1">Evidencia del incidente</h2>
+              <button id="download-evidence" class="button button-secondary" type="button" hidden>Descargar evidencia</button>
+            </div>
+            <p id="export-feedback" class="feedback" role="status" hidden></p>
             <p id="evidence-state" class="empty" role="status">Selecciona un incidente para consultar sus eventos.</p>
             <div id="evidence-content" class="evidence-content" hidden></div>
           </section>

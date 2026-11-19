@@ -5,7 +5,7 @@ import json
 import tempfile
 import unittest
 from dataclasses import replace
-from datetime import timedelta
+from datetime import datetime, timedelta
 from ipaddress import ip_network
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,10 +16,11 @@ from fastapi import BackgroundTasks, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from backend.analyst import AnalystError, Decision, drain_pending, parse_decision, run_analyst
+from backend.analyst import AnalystError, Decision, ask_model, drain_pending, parse_decision, run_analyst
 from backend.api.routes import (
     ObservationPayload,
     check_block,
+    export_incident,
     get_metrics,
     ingest_event,
     observe_access,
@@ -31,6 +32,7 @@ from backend.config import Settings
 from backend.containment import utc_now
 from backend.database import open_database
 from backend.models import AuditEntry, Block, Incident
+from backend.main import create_app
 
 
 class BackendPolicyTest(unittest.TestCase):
@@ -143,6 +145,86 @@ class BackendPolicyTest(unittest.TestCase):
             drain_pending(self.engine, replace(self.settings, ai_enabled=False))
             model.assert_not_called()
         self.assertEqual(self.incident_status(incident_id), "pending_verification")
+
+    def test_downloadable_export_contains_only_linked_evidence_and_public_settings(self):
+        self.request.app.state.settings = replace(self.settings, ai_enabled=False)
+        incident_id = self.trigger()
+        self.trigger("10.231.37.5")
+        with Session(self.engine) as session:
+            block = check_block("10.231.37.4", "servidor-web", session)
+            session.rollback()
+            observe_access(ObservationPayload(
+                source_ip="10.231.37.4", target="servidor-web",
+                http_status=403, request_id=uuid4(), block_id=block.block_id,
+            ), session)
+            release_block(block.block_id, session)
+            observe_access(ObservationPayload(
+                source_ip="10.231.37.4", target="servidor-web",
+                http_status=200, request_id=uuid4(),
+            ), session)
+            response = export_incident(UUID(incident_id), self.request, session)
+        exported = json.loads(response.body)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.headers["Content-Disposition"],
+            f'attachment; filename="sentinelcore-{incident_id}-evidence.json"',
+        )
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertEqual(exported["format_version"], "sentinelcore-evidence/1.0")
+        self.assertEqual(exported["parameters_basis"], "current_runtime")
+        self.assertEqual(datetime.fromisoformat(exported["generated_at"]).utcoffset(), timedelta(0))
+        self.assertEqual(exported["incident"]["id"], incident_id)
+        self.assertEqual(len(exported["incident"]["events"]), 5)
+        self.assertEqual(exported["incident"]["status"], "restored")
+        self.assertEqual(len(exported["blocks"]), 1)
+        self.assertTrue(exported["blocks"][0]["verified_at"])
+        self.assertTrue(exported["blocks"][0]["restored_at"])
+        self.assertEqual(
+            {entry["action"] for entry in exported["audit"]},
+            {"block_created", "block_verified", "block_released", "access_restored"},
+        )
+        self.assertTrue(all(entry["incident_id"] == incident_id for entry in exported["audit"]))
+        self.assertEqual(exported["parameters"]["high_threshold"], self.settings.high_threshold)
+        rendered = response.body.decode()
+        for secret in (self.settings.ingest_token, self.settings.admin_token, self.settings.ai_api_key):
+            self.assertNotIn(secret, rendered)
+        for key in ("ingest_token", "admin_token", "ai_api_key", "AI_API_KEY"):
+            self.assertNotIn(key, rendered)
+        self.assertNotIn("10.231.37.5", rendered)
+
+    def test_export_unknown_incident_and_openapi_contract(self):
+        with Session(self.engine) as session:
+            with self.assertRaises(HTTPException) as error:
+                export_incident(uuid4(), self.request, session)
+            self.assertEqual(error.exception.status_code, 404)
+        operation = create_app(self.settings).openapi()["paths"]["/api/incidents/{incident_id}/export"]["get"]
+        self.assertEqual(operation["security"], [{"HTTPBearer": []}])
+        self.assertIn("Content-Disposition", operation["responses"]["200"]["headers"])
+
+    def test_outbound_model_request_contains_only_aggregated_facts(self):
+        incident_id = self.trigger(usernames=["cuenta-canaria"] * 5)
+        with patch("backend.analyst.http.client.HTTPSConnection") as factory:
+            connection = factory.return_value
+            response = connection.getresponse.return_value.__enter__.return_value
+            response.status = 200
+            response.read.return_value = ModelResponseTest.envelope({
+                "action": "block", "confidence": .95, "explanation": "Patrón agregado",
+            })
+            run_analyst(self.engine, incident_id, self.settings)
+        method, path, body, _headers = connection.request.call_args.args
+        self.assertEqual(method, "POST")
+        self.assertEqual(path, "/openai/v1/chat/completions")
+        sent = json.loads(body)
+        facts = json.loads(next(message["content"] for message in sent["messages"] if message["role"] == "user"))
+        self.assertEqual(set(facts), {
+            "category", "failed_attempts", "event_count", "window_seconds",
+            "seconds_between_first_and_last", "distinct_usernames",
+        })
+        self.assertEqual(facts["distinct_usernames"], 1)
+        self.assertEqual(facts["failed_attempts"], 5)
+        for sensitive in ("10.231.37.4", "cuenta-canaria", incident_id,
+                          self.settings.ingest_token, self.settings.admin_token, self.settings.ai_api_key):
+            self.assertNotIn(sensitive, body)
 
     def test_model_review_and_auto_off_never_create_blocks(self):
         incident_id = self.trigger()
@@ -271,6 +353,28 @@ class ModelResponseTest(unittest.TestCase):
                     self.envelope([]), b"not-json"):
             with self.subTest(raw=raw), self.assertRaises(AnalystError):
                 parse_decision(raw)
+
+    def test_outbound_boundary_rejects_extra_fields_and_text_before_network(self):
+        settings = Settings("ingest-test", "admin-test", ai_api_key="fake-test-key")
+        facts = {
+            "category": "possible_brute_force", "failed_attempts": 5,
+            "event_count": 5, "window_seconds": 60,
+            "seconds_between_first_and_last": 1.2, "distinct_usernames": 1,
+        }
+        invalid = [
+            {**facts, "source_ip": "10.231.37.4"},
+            {**facts, "username": "cuenta-canaria"},
+            {**facts, "category": "cuenta-canaria"},
+            {**facts, "failed_attempts": "5"},
+            {**facts, "distinct_usernames": True},
+            {**facts, "window_seconds": float("nan")},
+        ]
+        for payload in invalid:
+            with self.subTest(payload=payload):
+                with patch("backend.analyst.http.client.HTTPSConnection") as network:
+                    with self.assertRaises(AnalystError):
+                        ask_model(payload, settings)
+                    network.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -32,6 +32,7 @@ Estas rutas requieren `Authorization: Bearer <ADMIN_TOKEN>`. El token de ingesta
 | --- | --- |
 | `GET /api/incidents` | `{items,total}`. Filtros `severity` y `status`, paginación `limit` y `offset`. |
 | `GET /api/incidents/{id}` | Incidente más el arreglo `events` con los eventos asociados. `404` si no existe. |
+| `GET /api/incidents/{id}/export` | JSON descargable de incidente, eventos, bloqueos y auditoría. `parameters_basis=current_runtime` identifica los parámetros vigentes al exportar. |
 | `GET /api/metrics` | `{events,incidents,alerts,verified_blocks,active_blocks,restored_access}`. `alerts` cuenta incidentes con alerta. Los verificados y restaurados cuentan medidas históricas con evidencia. Los activos cuentan restricciones vigentes. |
 | `GET /api/blocks` | Arreglo de los últimos 100 bloqueos, con `verified_at` y `restored_at` opcionales. `active_only=true` filtra vigentes. |
 | `GET /api/audit` | Arreglo de registros con actor, acción, hora, origen e incidente. `limit` admite hasta 200. |

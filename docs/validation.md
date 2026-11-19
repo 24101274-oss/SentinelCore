@@ -2,11 +2,11 @@
 
 ## Suite ejecutada
 
-`python -m unittest discover -s tests -v` terminó con 19 pruebas correctas y cero omisiones, en 24,803 segundos sobre Windows y Python 3.14.
+La última ejecución de `python -m unittest discover -s tests -v` terminó con 23 pruebas correctas y cero omisiones, en 25,285 segundos sobre Windows y Python 3.14.
 
 Se comprobaron autenticación, permisos de tokens, idempotencia, ventanas, excepciones, rechazo HTTP 403 ante credenciales correctas cuando existe bloqueo, liberación manual, expiración y evidencia de recuperación. También pasaron migración repetible desde tablas antiguas, respuestas de IA malformadas, fallback ante fallos, límite de bloqueos y recuperación de decisiones interrumpidas.
 
-Los casos de IA usan respuestas controladas de prueba. La ejecución contra Groq queda pendiente de configurar una clave propia y comprobar la disponibilidad del modelo.
+Los casos de IA usan respuestas controladas de prueba. La clave configurada respondió HTTP 200 a la consulta real de modelos y el modelo seleccionado está disponible. Las decisiones reales del proveedor siguen pendientes de comprobación.
 
 ## Flujo de navegador ejecutado
 
@@ -26,5 +26,7 @@ La prueba de navegador usó una base temporal, ventana de tres segundos y bloque
 ## Inicio de la presentación
 
 Se ejecutó el iniciador LAN con detección de la subred real, contención automática activa y acceso HTTP 200. Se verificó el cierre de los dos servicios. La PC y el gateway se agregan a las excepciones de esa ejecución.
+
+También se verificó `--presentation` con una base nueva por sesión, contadores iniciales en cero y conservación del historial anterior. En Edge se descargaron desde el botón las evidencias de un incidente con bloqueo verificado y después con recuperación verificada. El portal consultó acceso durante la espera de decisión y reactivó los controles al terminar.
 
 Quedan por comprobar en el lugar de presentación la conexión desde el segundo dispositivo y los permisos de red de Windows. La prueba de navegador de este registro se ejecutó desde la misma PC. Docker Compose se entrega configurado y su ejecución queda pendiente de un motor Docker disponible.

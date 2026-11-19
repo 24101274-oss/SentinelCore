@@ -58,7 +58,7 @@ function displayMessage(id, message) {
   target.hidden = !message;
 }
 
-async function api(path, activeSession, signal = activeSession.controller.signal, method = "GET") {
+async function request(path, activeSession, signal = activeSession.controller.signal, method = "GET") {
   let response;
   try {
     response = await fetch(path, {
@@ -81,6 +81,11 @@ async function api(path, activeSession, signal = activeSession.controller.signal
     const body = await response.json().catch(() => ({}));
     throw new Error(typeof body.detail === "string" ? body.detail : `La API respondió con un error (${response.status}).`);
   }
+  return response;
+}
+
+async function api(path, activeSession, signal = activeSession.controller.signal, method = "GET") {
+  const response = await request(path, activeSession, signal, method);
   return response.json();
 }
 
@@ -193,10 +198,24 @@ function renderDetail(incident) {
     incident.events.length ? events : node("p", "No hay eventos asociados."),
   );
   content.hidden = false;
+  const download = element("download-evidence");
+  download.dataset.incident = incident.id;
+  download.hidden = false;
+  download.disabled = Boolean(session?.exporting);
   displayMessage("evidence-state", "");
 }
 
 function renderBlocks(blocks, activeSession) {
+  if (activeSession.releaseFeedbackId) {
+    const released = blocks.find((block) => block.id === activeSession.releaseFeedbackId);
+    const newActiveBlock = released && blocks.some((block) => (
+      block.status === "active" && block.source_ip === released.source_ip && block.target === released.target
+    ));
+    if (!released || released.restored_at || newActiveBlock) {
+      activeSession.releaseFeedbackId = undefined;
+      displayMessage("block-feedback", "");
+    }
+  }
   activeSession.blocks = blocks;
   const fragment = document.createDocumentFragment();
   for (const block of blocks) {
@@ -281,6 +300,7 @@ async function releaseBlock(activeSession) {
     const block = await api(`/api/blocks/${encodeURIComponent(blockId)}/release`, activeSession, activeSession.controller.signal, "POST");
     if (session !== activeSession) return;
     activeSession.pendingRelease = undefined;
+    activeSession.releaseFeedbackId = blockId;
     element("release-confirmation").hidden = true;
     blockFeedback(block.restored_at
       ? "Acceso restaurado y comprobado por el servicio protegido."
@@ -299,12 +319,52 @@ async function releaseBlock(activeSession) {
   }
 }
 
+async function downloadEvidence(activeSession) {
+  const incidentId = element("download-evidence").dataset.incident;
+  if (!incidentId || activeSession.exporting) return;
+  activeSession.exporting = incidentId;
+  element("download-evidence").disabled = true;
+  element("export-feedback").dataset.state = "success";
+  displayMessage("export-feedback", "Preparando el archivo de evidencia…");
+
+  try {
+    const response = await request(`/api/incidents/${encodeURIComponent(incidentId)}/export`, activeSession);
+    const blob = await response.blob();
+    if (session !== activeSession) return;
+    const filename = response.headers.get("Content-Disposition")?.match(/filename="([^"]+)"/i)?.[1]
+      || `sentinelcore-${incidentId}-evidence.json`;
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename.split(/[\\/]/).pop();
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    if (activeSession.selected === incidentId) {
+      displayMessage("export-feedback", "Descarga iniciada. El archivo JSON incluye los eventos, bloqueos y auditoría del incidente.");
+    }
+  } catch (error) {
+    if (session !== activeSession) return;
+    if (error.unauthorized) disconnect(error.message);
+    else if (activeSession.selected === incidentId) {
+      element("export-feedback").dataset.state = "error";
+      displayMessage("export-feedback", error.message);
+    }
+  } finally {
+    activeSession.exporting = undefined;
+    if (session === activeSession) element("download-evidence").disabled = false;
+  }
+}
+
 async function updateDetail(activeSession, id, showLoading) {
   activeSession.detailRequest?.abort();
   const request = new AbortController();
   activeSession.detailRequest = request;
   const current = () => session === activeSession && activeSession.detailRequest === request;
   if (showLoading) {
+    element("download-evidence").hidden = true;
+    displayMessage("export-feedback", "");
     element("evidence-content").hidden = true;
     displayMessage("evidence-state", "Cargando evidencia…");
   }
@@ -318,6 +378,7 @@ async function updateDetail(activeSession, id, showLoading) {
       return;
     }
     element("evidence-content").hidden = true;
+    element("download-evidence").hidden = true;
     displayMessage("evidence-state", error.message);
   } finally {
     if (current()) activeSession.detailRequest = undefined;
@@ -398,6 +459,8 @@ function disconnect(message = "") {
   element("audit-list").replaceChildren();
   element("release-confirmation").hidden = true;
   displayMessage("block-feedback", "");
+  displayMessage("export-feedback", "");
+  element("download-evidence").hidden = true;
   element("evidence-content").hidden = true;
   element("evidence-content").replaceChildren();
   displayMessage("evidence-state", "Selecciona un incidente para consultar sus eventos.");
@@ -442,6 +505,9 @@ element("refresh").addEventListener("click", () => {
   if (session) void refresh(session);
 });
 element("disconnect").addEventListener("click", () => disconnect());
+element("download-evidence").addEventListener("click", () => {
+  if (session) void downloadEvidence(session);
+});
 
 element("block-rows").addEventListener("click", (event) => {
   const button = event.target.closest("button[data-release]");
@@ -449,6 +515,8 @@ element("block-rows").addEventListener("click", (event) => {
   const block = session.blocks.find((item) => item.id === button.dataset.release);
   if (!block) return;
   session.pendingRelease = block.id;
+  session.releaseFeedbackId = undefined;
+  displayMessage("block-feedback", "");
   element("release-prompt").textContent = `Restaurar el acceso de ${block.source_ip} al servicio ${block.target}. El sistema comprobará el resultado con la siguiente solicitud del origen.`;
   element("release-confirmation").hidden = false;
   element("confirm-release").focus();

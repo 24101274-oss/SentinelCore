@@ -4,6 +4,7 @@ from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy import func, select, text
@@ -87,6 +88,18 @@ def serialize_event(event: SecurityEvent) -> EventEvidence:
     )
 
 
+def serialize_incident_detail(incident: Incident, session: Session) -> IncidentDetail:
+    evidence = session.scalars(
+        select(SecurityEvent)
+        .where(SecurityEvent.incident_id == incident.id)
+        .order_by(SecurityEvent.timestamp, SecurityEvent.id)
+    )
+    return IncidentDetail(
+        **serialize_incident(incident).model_dump(),
+        events=[serialize_event(event) for event in evidence],
+    )
+
+
 @router.post("/events", status_code=201, dependencies=[Depends(require_ingest_token)])
 def ingest_event(
     payload: EventPayload,
@@ -158,15 +171,7 @@ def get_incident(incident_id: UUID, session: DatabaseSession) -> IncidentDetail:
     if incident is None:
         raise HTTPException(status_code=404, detail="Incidente no encontrado")
 
-    evidence = session.scalars(
-        select(SecurityEvent)
-        .where(SecurityEvent.incident_id == incident.id)
-        .order_by(SecurityEvent.timestamp, SecurityEvent.id)
-    )
-    return IncidentDetail(
-        **serialize_incident(incident).model_dump(),
-        events=[serialize_event(event) for event in evidence],
-    )
+    return serialize_incident_detail(incident, session)
 
 
 class BlockStatus(BaseModel):
@@ -212,6 +217,24 @@ class AuditItem(BaseModel):
     target: str
     incident_id: str | None = None
     detail: str
+
+
+class IncidentExport(BaseModel):
+    format_version: Literal["sentinelcore-evidence/1.0"] = "sentinelcore-evidence/1.0"
+    generated_at: datetime
+    incident: IncidentDetail
+    blocks: list[BlockItem]
+    audit: list[AuditItem]
+    parameters: dict
+    parameters_basis: Literal["current_runtime"] = "current_runtime"
+
+
+def serialize_audit(entry: AuditEntry) -> AuditItem:
+    return AuditItem(
+        id=entry.id, timestamp=entry.timestamp.replace(tzinfo=UTC), actor=entry.actor,
+        action=entry.action, source_ip=entry.source_ip, target=entry.target,
+        incident_id=entry.incident_id, detail=entry.detail,
+    )
 
 
 def serialize_block(block: Block) -> BlockItem:
@@ -386,11 +409,43 @@ def list_audit(
     session: DatabaseSession, limit: Annotated[int, Query(ge=1, le=200)] = 50
 ) -> list[AuditItem]:
     entries = session.scalars(select(AuditEntry).order_by(AuditEntry.timestamp.desc()).limit(limit))
-    return [AuditItem(
-        id=entry.id, timestamp=entry.timestamp.replace(tzinfo=UTC), actor=entry.actor,
-        action=entry.action, source_ip=entry.source_ip, target=entry.target,
-        incident_id=entry.incident_id, detail=entry.detail,
-    ) for entry in entries]
+    return [serialize_audit(entry) for entry in entries]
+
+
+@router.get(
+    "/incidents/{incident_id}/export",
+    dependencies=[Depends(require_admin_token)],
+    response_model=IncidentExport,
+    responses={200: {"headers": {"Content-Disposition": {"schema": {"type": "string"}}}}},
+)
+def export_incident(incident_id: UUID, request: Request, session: DatabaseSession) -> JSONResponse:
+    expire_due_blocks(session)
+    # Leer todas las entidades en una instantánea SQLite consistente.
+    session.rollback()
+    session.execute(text("BEGIN"))
+    incident = session.get(Incident, str(incident_id))
+    if incident is None:
+        raise HTTPException(status_code=404, detail="Incidente no encontrado")
+    blocks = session.scalars(select(Block).where(
+        Block.incident_id == incident.id
+    ).order_by(Block.created_at, Block.id))
+    audit = session.scalars(select(AuditEntry).where(
+        AuditEntry.incident_id == incident.id
+    ).order_by(AuditEntry.timestamp, AuditEntry.id))
+    bundle = IncidentExport(
+        generated_at=datetime.now(UTC),
+        incident=serialize_incident_detail(incident, session),
+        blocks=[serialize_block(block) for block in blocks],
+        audit=[serialize_audit(entry) for entry in audit],
+        parameters=get_system(request),
+    )
+    return JSONResponse(
+        content=bundle.model_dump(mode="json"),
+        headers={
+            "Content-Disposition": f'attachment; filename="sentinelcore-{incident_id}-evidence.json"',
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @router.get("/metrics", dependencies=[Depends(require_admin_token)])
@@ -415,6 +470,8 @@ def get_system(request: Request) -> dict:
     settings = request.app.state.settings
     return {
         "ai_enabled": settings.ai_enabled, "ai_model": settings.ai_model,
+        "ai_min_confidence": settings.ai_min_confidence,
+        "ai_timeout_seconds": settings.ai_timeout_seconds,
         "auto_containment": settings.auto_containment,
         "medium_threshold": settings.medium_threshold, "high_threshold": settings.high_threshold,
         "window_seconds": settings.window.total_seconds(),
