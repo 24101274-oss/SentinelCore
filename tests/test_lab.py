@@ -125,18 +125,18 @@ class LabIntegrationTest(unittest.TestCase):
         self.assertEqual(request(18060, "POST", "/api/events", payload, self.ingest)[0], 422)
 
     def test_window_and_allowlist(self):
-        now = datetime.now(UTC)
-        base = {"event_type": "failed_login", "target": "servidor-web",
-                "metadata": {"username": "admin", "success": False}}
-        for source_ip, expected in [("10.231.37.1", "review"), ("10.231.37.4", "pending_containment")]:
-            receipt = None
-            for delay in [120, 4, 3, 2, 1, 0]:
-                body = {**base, "source_ip": source_ip, "timestamp": (now - timedelta(seconds=delay)).isoformat()}
-                status, receipt = request(18060, "POST", "/api/events", body, self.ingest)
-                self.assertEqual(status, 201)
-            self.assertEqual(receipt["severity"], "high")
-            _, incident = request(18060, "GET", f"/api/incidents/{receipt['incident_id']}", headers=self.admin)
-            self.assertEqual((incident["event_count"], incident["status"]), (5, expected))
+            now = datetime.now(UTC)
+            base = {"event_type": "failed_login", "target": "servidor-web",
+                    "metadata": {"username": "admin", "success": False}}
+            for source_ip, expected in [("10.231.37.1", "review"), ("10.231.37.4", "contained")]:
+                receipt = None
+                for delay in [120, 4, 3, 2, 1, 0]:
+                    body = {**base, "source_ip": source_ip, "timestamp": (now - timedelta(seconds=delay)).isoformat()}
+                    status, receipt = request(18060, "POST", "/api/events", body, self.ingest)
+                    self.assertEqual(status, 201)
+                self.assertEqual(receipt["severity"], "high")
+                _, incident = request(18060, "GET", f"/api/incidents/{receipt['incident_id']}", headers=self.admin)
+                self.assertEqual((incident["event_count"], incident["status"]), (5, expected))
 
     def test_dashboard_assets(self):
         for asset in ("", "dashboard.css", "dashboard.js"):

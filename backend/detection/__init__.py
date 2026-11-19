@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from backend.config import Settings
 from backend.models import Incident, SecurityEvent
-
+from backend.containment import apply_containment
 
 def response_recommendation(source_ip: str, severity: str, settings: Settings) -> tuple[str, str, str]:
     if severity == "medium":
@@ -84,3 +84,4 @@ def correlate(session: Session, event: SecurityEvent, settings: Settings) -> Non
     for item in newly_linked:
         item.incident_id = incident.id
     event.receipt_incident_id = incident.id
+    apply_containment(session, incident, settings)
