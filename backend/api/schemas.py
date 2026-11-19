@@ -6,7 +6,7 @@ from uuid import UUID
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StrictBool, field_validator
 
 Severity = Literal["low", "medium", "high"]
-IncidentStatus = Literal["alert", "pending_containment", "review", "contained"]
+IncidentStatus = Literal["alert", "pending_containment", "pending_verification", "review", "contained", "restoration_pending", "restored"]
 RecommendedAction = Literal["review", "temporary_block"]
 
 
@@ -68,7 +68,7 @@ class EventReceipt(BaseModel):
 
 class IncidentSummary(BaseModel):
     id: UUID
-    category: Literal["possible_brute_force"] = "possible_brute_force"
+    category: Literal["possible_brute_force", "possible_password_spraying"] = "possible_brute_force"
     source_ip: str
     target: str
     severity: Severity
@@ -105,3 +105,5 @@ class Metrics(BaseModel):
     incidents: int
     alerts: int
     verified_blocks: int
+    active_blocks: int
+    restored_access: int

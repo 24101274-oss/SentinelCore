@@ -4,14 +4,14 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="dark">
-    <title>SentinelCore | Consola del laboratorio</title>
+    <title>SentinelCore | Centro de operaciones</title>
     <link rel="stylesheet" href="./dashboard.css">
     <script src="./dashboard.js" defer></script>
   </head>
   <body>
     <header class="topbar">
       <div class="shell topbar-inner">
-        <a class="brand" href="./">Sentinel<span>Core</span></a>
+        <a class="brand" href="./"><span class="brand-mark" aria-hidden="true">S</span>Sentinel<span>Core</span></a>
         <div class="connection">
           <span id="connection-state" class="connection-state" data-state="offline">Desconectado</span>
           <button id="disconnect" class="button button-secondary" type="button" hidden>Desconectar</button>
@@ -21,7 +21,8 @@
 
     <main class="shell main">
       <section id="access" class="panel access" aria-labelledby="access-title">
-        <h1 id="access-title">Consola del laboratorio</h1>
+        <p class="eyebrow">SENTINELCORE · LABORATORIO DE SEGURIDAD</p>
+        <h1 id="access-title">Centro de operaciones</h1>
         <p>Conéctate con el <code>ADMIN_TOKEN</code> configurado para esta instancia de SentinelCore.</p>
         <form id="connect-form" method="post">
           <label for="token">Token de administrador</label>
@@ -36,10 +37,14 @@
       <section id="workspace" aria-labelledby="workspace-title" hidden>
         <div class="workspace-heading">
           <div>
-            <h1 id="workspace-title" tabindex="-1">Consola del laboratorio</h1>
-            <p class="last-update">Última actualización <time id="updated">—</time></p>
+            <p class="eyebrow">LABORATORIO DE SEGURIDAD</p>
+            <h1 id="workspace-title" tabindex="-1">Centro de operaciones</h1>
+            <p class="last-update">Última actualización <time id="updated">—</time> · Actualización automática cada 8 s</p>
           </div>
-          <button id="refresh" class="button button-secondary" type="button">Actualizar</button>
+          <div class="workspace-actions">
+            <a id="lab-link" class="button button-secondary" href="#" target="_blank" rel="noopener noreferrer">Abrir laboratorio ↗</a>
+            <button id="refresh" class="button button-secondary" type="button">Actualizar</button>
+          </div>
         </div>
         <p id="refresh-error" class="error banner" role="alert" hidden></p>
 
@@ -48,7 +53,16 @@
           <div class="panel metric"><dt>Incidentes</dt><dd id="metric-incidents">—</dd></div>
           <div class="panel metric"><dt>Alertas</dt><dd id="metric-alerts">—</dd></div>
           <div class="panel metric"><dt>Bloqueos verificados</dt><dd id="metric-verified-blocks">—</dd></div>
+          <div class="panel metric"><dt>Bloqueos activos</dt><dd id="metric-active-blocks">—</dd></div>
+          <div class="panel metric"><dt>Accesos restaurados</dt><dd id="metric-restored-access">—</dd></div>
         </dl>
+
+        <section class="system-strip" aria-label="Configuración activa">
+          <div><span class="system-label">Análisis</span><strong id="system-analysis">Consultando…</strong></div>
+          <div><span class="system-label">Contención automática</span><strong id="system-containment">—</strong></div>
+          <div><span class="system-label">Regla de riesgo alto</span><strong id="system-rule">—</strong></div>
+          <div><span class="system-label">Duración del bloqueo</span><strong id="system-duration">—</strong></div>
+        </section>
 
         <div class="workspace-grid">
           <section class="panel incidents" aria-labelledby="incidents-title">
@@ -59,7 +73,7 @@
             <p id="incident-empty" class="empty">Todavía no se han registrado incidentes.</p>
             <div id="incident-table" class="table-scroll" hidden>
               <table aria-label="Incidentes registrados">
-                <thead><tr><th scope="col">Incidente</th><th scope="col">Origen</th><th scope="col">Riesgo</th><th scope="col">Fallos</th></tr></thead>
+                <thead><tr><th scope="col">Incidente / origen</th><th scope="col">Riesgo</th><th scope="col">Estado</th><th scope="col">Último evento</th></tr></thead>
                 <tbody id="incident-rows"></tbody>
               </table>
             </div>
@@ -71,6 +85,32 @@
             <div id="evidence-content" class="evidence-content" hidden></div>
           </section>
         </div>
+
+        <section class="panel blocks" aria-labelledby="blocks-title">
+          <div class="panel-heading"><h2 id="blocks-title">Contención y recuperación</h2><span id="blocks-count" class="hint"></span></div>
+          <p class="panel-intro">Un bloqueo queda verificado cuando el servicio confirma el rechazo. La restauración se confirma al comprobar de nuevo el acceso.</p>
+          <p id="block-feedback" class="feedback" role="status" hidden></p>
+          <div id="release-confirmation" class="release-confirmation" hidden>
+            <p id="release-prompt"></p>
+            <div class="workspace-actions">
+              <button id="confirm-release" class="button button-primary" type="button">Confirmar restauración</button>
+              <button id="cancel-release" class="button button-secondary" type="button">Cancelar</button>
+            </div>
+          </div>
+          <p id="blocks-empty" class="empty">Todavía no se han aplicado bloqueos.</p>
+          <div id="blocks-table" class="table-scroll" hidden>
+            <table aria-label="Historial de bloqueos y restauraciones">
+              <thead><tr><th scope="col">Origen / servicio</th><th scope="col">Estado</th><th scope="col">Vencimiento</th><th scope="col">Comprobación</th><th scope="col">Acción</th></tr></thead>
+              <tbody id="block-rows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel audit" aria-labelledby="audit-title">
+          <div class="panel-heading"><h2 id="audit-title">Actividad y auditoría</h2><span id="audit-count" class="hint"></span></div>
+          <p id="audit-empty" class="empty">Las decisiones y acciones aparecerán aquí.</p>
+          <ol id="audit-list" class="audit-list"></ol>
+        </section>
       </section>
     </main>
   </body>

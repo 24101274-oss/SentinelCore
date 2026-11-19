@@ -1,5 +1,5 @@
 from datetime import datetime
-from ipaddress import ip_address
+from collections import Counter
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -7,22 +7,20 @@ from sqlalchemy.orm import Session
 
 from backend.config import Settings
 from backend.models import Incident, SecurityEvent
-from backend.containment import apply_containment
+from backend.containment import apply_containment, expire_blocks, find_active_block, policy_exclusion
 
 def response_recommendation(source_ip: str, severity: str, settings: Settings) -> tuple[str, str, str]:
     if severity == "medium":
         return "alert", "review", "Se recomienda revisar la alerta."
 
-    address = ip_address(source_ip)
-    protected = address.is_loopback or address.is_unspecified or address.is_multicast or address.is_link_local
-    if protected or any(address in network for network in settings.allowlist):
-        return "review", "review", "La IP está exceptuada por la política."
-    if not any(address in network for network in settings.lab_networks):
-        return "review", "review", "La IP está fuera de las redes autorizadas del laboratorio."
+    exclusion = policy_exclusion(source_ip, "servidor-web", settings)
+    if exclusion:
+        return "review", "review", exclusion
     return "pending_containment", "temporary_block", "La IP es candidata a un bloqueo temporal."
 
 
 def correlate(session: Session, event: SecurityEvent, settings: Settings) -> None:
+    expire_blocks(session)
     scope = (SecurityEvent.source_ip == event.source_ip, SecurityEvent.target == event.target)
     latest = session.scalar(
         select(SecurityEvent.timestamp)
@@ -70,6 +68,12 @@ def correlate(session: Session, event: SecurityEvent, settings: Settings) -> Non
     incident.attempts = max(incident.attempts, count)
     if event.severity == "high":
         incident.severity = "high"
+    usernames = Counter(item.details["username"] for item in evidence)
+    incident.category = (
+        "possible_password_spraying"
+        if count >= settings.high_threshold and len(usernames) >= 5 and max(usernames.values()) <= 2
+        else "possible_brute_force"
+    )
     incident.status, incident.recommended_action, explanation = response_recommendation(
         event.source_ip, incident.severity, settings
     )
@@ -84,4 +88,8 @@ def correlate(session: Session, event: SecurityEvent, settings: Settings) -> Non
     for item in newly_linked:
         item.incident_id = incident.id
     event.receipt_incident_id = incident.id
-    apply_containment(session, incident, settings)
+    active = find_active_block(session, incident.source_ip, incident.target)
+    if active is not None:
+        incident.status = "contained" if active.verified_at is not None else "pending_verification"
+    else:
+        apply_containment(session, incident, settings)

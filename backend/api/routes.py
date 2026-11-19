@@ -1,11 +1,11 @@
 from datetime import UTC, datetime
 from secrets import compare_digest
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
@@ -20,10 +20,13 @@ from backend.api.schemas import (
     Metrics,
     Severity,
 )
-from backend.containment import expire_blocks, find_active_block, record_audit, utc_now
+from backend.containment import (
+    create_block, expire_blocks, find_active_block, record_audit,
+    release_containment, utc_now,
+)
 from backend.analyst import run_analyst
 from backend.detection import correlate
-from backend.models import AuditEntry, Block, Incident, SecurityEvent
+from backend.models import AccessObservation, AuditEntry, Block, Incident, SecurityEvent
 
 router = APIRouter(prefix="/api")
 bearer = HTTPBearer(auto_error=False)
@@ -58,6 +61,7 @@ DatabaseSession = Annotated[Session, Depends(get_session)]
 def serialize_incident(incident: Incident) -> IncidentSummary:
     return IncidentSummary(
         id=incident.id,
+        category=incident.category,
         source_ip=incident.source_ip,
         target=incident.target,
         severity=incident.severity,
@@ -116,7 +120,7 @@ def ingest_event(
     )
     session.commit()
     settings = request.app.state.settings
-    if settings.ai_enabled and receipt.incident_id:
+    if settings.ai_enabled and settings.auto_containment and receipt.incident_id:
         background.add_task(run_analyst, request.app.state.engine, receipt.incident_id, settings)
     return receipt
 
@@ -129,6 +133,7 @@ def list_incidents(
     severity: Severity | None = None,
     status: IncidentStatus | None = None,
 ) -> IncidentPage:
+    expire_due_blocks(session)
     filters = []
     if severity is not None:
         filters.append(Incident.severity == severity)
@@ -148,6 +153,7 @@ def list_incidents(
 
 @router.get("/incidents/{incident_id}", dependencies=[Depends(require_admin_token)])
 def get_incident(incident_id: UUID, session: DatabaseSession) -> IncidentDetail:
+    expire_due_blocks(session)
     incident = session.get(Incident, str(incident_id))
     if incident is None:
         raise HTTPException(status_code=404, detail="Incidente no encontrado")
@@ -165,6 +171,7 @@ def get_incident(incident_id: UUID, session: DatabaseSession) -> IncidentDetail:
 
 class BlockStatus(BaseModel):
     blocked: bool
+    block_id: UUID | None = None
     expires_at: datetime | None = None
 
 
@@ -177,6 +184,23 @@ class BlockItem(BaseModel):
     created_at: datetime
     expires_at: datetime
     released_at: datetime | None = None
+    verified_at: datetime | None = None
+    restored_at: datetime | None = None
+
+
+class ObservationPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_ip: str
+    target: Literal["servidor-web"]
+    http_status: Literal[200, 403]
+    request_id: UUID
+    block_id: UUID | None = None
+
+    @field_validator("source_ip")
+    @classmethod
+    def normalize_ip(cls, value: str) -> str:
+        return EventPayload.normalize_ip(value)
 
 
 class AuditItem(BaseModel):
@@ -192,57 +216,167 @@ class AuditItem(BaseModel):
 
 def serialize_block(block: Block) -> BlockItem:
     return BlockItem(
-        id=block.id,
-        incident_id=block.incident_id,
-        source_ip=block.source_ip,
-        target=block.target,
-        status=block.status,
+        id=block.id, incident_id=block.incident_id, source_ip=block.source_ip,
+        target=block.target, status=block.status,
         created_at=block.created_at.replace(tzinfo=UTC),
         expires_at=block.expires_at.replace(tzinfo=UTC),
         released_at=block.released_at.replace(tzinfo=UTC) if block.released_at else None,
+        verified_at=block.verified_at.replace(tzinfo=UTC) if block.verified_at else None,
+        restored_at=block.restored_at.replace(tzinfo=UTC) if block.restored_at else None,
     )
 
 
+def expire_due_blocks(session: Session) -> None:
+    """Las consultas frecuentes solo escriben cuando hay un vencimiento pendiente."""
+    due = session.scalar(
+        select(Block.id).where(Block.status == "active", Block.expires_at <= utc_now()).limit(1)
+    )
+    if due is not None:
+        session.rollback()
+        session.execute(text("BEGIN IMMEDIATE"))
+        expire_blocks(session)
+        session.commit()
+
+
+@router.get("/access/check", dependencies=[Depends(require_ingest_token)])
 @router.get("/blocks/check", dependencies=[Depends(require_ingest_token)])
-def check_block(source_ip: str, target: str, session: DatabaseSession) -> BlockStatus:
-    """La app protegida pregunta aquí si una IP está bloqueada antes de revisar el login."""
-    session.execute(text("BEGIN IMMEDIATE"))
+def check_block(source_ip: str, target: Literal["servidor-web"], session: DatabaseSession) -> BlockStatus:
+    try:
+        source_ip = EventPayload.normalize_ip(source_ip)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail="source_ip inválida") from error
+    expire_due_blocks(session)
     block = find_active_block(session, source_ip, target)
     if block is None:
-        result = BlockStatus(blocked=False)
+        return BlockStatus(blocked=False)
+    return BlockStatus(
+        blocked=True, block_id=block.id, expires_at=block.expires_at.replace(tzinfo=UTC)
+    )
+
+
+@router.post("/access/observations", status_code=201, dependencies=[Depends(require_ingest_token)])
+def observe_access(payload: ObservationPayload, session: DatabaseSession) -> dict:
+    session.execute(text("BEGIN IMMEDIATE"))
+    existing = session.get(AccessObservation, str(payload.request_id))
+    fields = {
+        "source_ip": payload.source_ip, "target": payload.target,
+        "http_status": payload.http_status,
+        "block_id": str(payload.block_id) if payload.block_id else None,
+    }
+    if existing is not None:
+        if any(getattr(existing, key) != value for key, value in fields.items()):
+            raise HTTPException(status_code=409, detail="request_id corresponde a otra observación")
+        return existing.result
+
+    expire_blocks(session)
+    active = find_active_block(session, payload.source_ip, payload.target)
+    block = None
+    incident_status = None
+    if payload.http_status == 403:
+        if active is None or fields["block_id"] != active.id:
+            raise HTTPException(status_code=409, detail="El rechazo no coincide con un bloqueo activo")
+        block = active
+        if block.verified_at is None:
+            block.verified_at = utc_now()
+            record_audit(
+                session, "protected_app", "block_verified", block.source_ip, block.target,
+                block.incident_id,
+                f"El servicio protegido rechazó con HTTP 403. Solicitud {payload.request_id}.",
+            )
+        incident = session.get(Incident, block.incident_id)
+        incident.status = "contained"
+        incident_status = incident.status
     else:
-        result = BlockStatus(blocked=True, expires_at=block.expires_at.replace(tzinfo=UTC))
+        if active is not None:
+            raise HTTPException(status_code=409, detail="No se puede verificar acceso permitido con bloqueo activo")
+        if fields["block_id"] is not None:
+            referenced = session.get(Block, fields["block_id"])
+            if referenced is None or referenced.source_ip != payload.source_ip or referenced.target != payload.target:
+                raise HTTPException(status_code=409, detail="El bloqueo no coincide con el origen de la observación")
+        pending = session.scalars(
+            select(Block).where(
+                Block.source_ip == payload.source_ip, Block.target == payload.target,
+                Block.status.in_(["released", "expired"]), Block.restored_at.is_(None),
+            ).order_by(Block.created_at.desc())
+        ).all()
+        for released in pending:
+            released.restored_at = utc_now()
+            incident = session.get(Incident, released.incident_id)
+            incident.status = "restored"
+            incident_status = incident.status
+            record_audit(
+                session, "protected_app", "access_restored", released.source_ip,
+                released.target, released.incident_id,
+                f"El servicio protegido permitió HTTP 200. Solicitud {payload.request_id}.",
+            )
+        if pending:
+            block = pending[0]
+
+    result = {
+        "recorded": True, "block_id": block.id if block else None,
+        "incident_status": incident_status,
+    }
+    session.add(AccessObservation(
+        id=str(payload.request_id), observed_at=utc_now(), result=result, **fields,
+    ))
     session.commit()
     return result
 
 
 @router.get("/blocks", dependencies=[Depends(require_admin_token)])
 def list_blocks(session: DatabaseSession, active_only: bool = False) -> list[BlockItem]:
-    session.execute(text("BEGIN IMMEDIATE"))
-    expire_blocks(session)
+    expire_due_blocks(session)
     query = select(Block)
     if active_only:
-        query = query.where(Block.status == "active")
-    result = [serialize_block(b) for b in session.scalars(query.order_by(Block.created_at.desc()).limit(100))]
-    session.commit()
-    return result
+        query = query.where(Block.status == "active", Block.expires_at > utc_now())
+    return [serialize_block(block) for block in session.scalars(
+        query.order_by(Block.created_at.desc()).limit(100)
+    )]
 
 
 @router.post("/blocks/{block_id}/release", dependencies=[Depends(require_admin_token)])
 def release_block(block_id: UUID, session: DatabaseSession) -> BlockItem:
     session.execute(text("BEGIN IMMEDIATE"))
+    expire_blocks(session)
     block = session.get(Block, str(block_id))
     if block is None:
         raise HTTPException(status_code=404, detail="Bloqueo no encontrado")
     if block.status != "active":
         raise HTTPException(status_code=409, detail="El bloqueo ya no está activo")
-    block.status = "released"
-    block.released_at = utc_now()
-    record_audit(
-        session, "admin", "block_released", block.source_ip, block.target,
-        block.incident_id, "Un administrador liberó el bloqueo manualmente.",
-    )
+    release_containment(session, block)
     result = serialize_block(block)
+    session.commit()
+    return result
+
+
+@router.post("/incidents/{incident_id}/respond", dependencies=[Depends(require_admin_token)])
+def respond_incident(incident_id: UUID, request: Request, session: DatabaseSession) -> BlockItem:
+    session.execute(text("BEGIN IMMEDIATE"))
+    incident = session.get(Incident, str(incident_id))
+    if incident is None:
+        raise HTTPException(status_code=404, detail="Incidente no encontrado")
+    block = create_block(session, incident, request.app.state.settings, "admin", "Solicitud manual autorizada.")
+    if block is None:
+        reason = incident.reason
+        session.commit()
+        raise HTTPException(status_code=409, detail=reason)
+    result = serialize_block(block)
+    session.commit()
+    return result
+
+
+@router.post("/incidents/{incident_id}/restore", dependencies=[Depends(require_admin_token)])
+def restore_incident(incident_id: UUID, session: DatabaseSession) -> IncidentSummary:
+    session.execute(text("BEGIN IMMEDIATE"))
+    expire_blocks(session)
+    incident = session.get(Incident, str(incident_id))
+    if incident is None:
+        raise HTTPException(status_code=404, detail="Incidente no encontrado")
+    for block in session.scalars(select(Block).where(
+        Block.incident_id == incident.id, Block.status == "active"
+    )):
+        release_containment(session, block)
+    result = serialize_incident(incident)
     session.commit()
     return result
 
@@ -252,24 +386,41 @@ def list_audit(
     session: DatabaseSession, limit: Annotated[int, Query(ge=1, le=200)] = 50
 ) -> list[AuditItem]:
     entries = session.scalars(select(AuditEntry).order_by(AuditEntry.timestamp.desc()).limit(limit))
-    return [
-        AuditItem(
-            id=e.id,
-            timestamp=e.timestamp.replace(tzinfo=UTC),
-            actor=e.actor,
-            action=e.action,
-            source_ip=e.source_ip,
-            target=e.target,
-            incident_id=e.incident_id,
-            detail=e.detail,
-        )
-        for e in entries
-    ]
+    return [AuditItem(
+        id=entry.id, timestamp=entry.timestamp.replace(tzinfo=UTC), actor=entry.actor,
+        action=entry.action, source_ip=entry.source_ip, target=entry.target,
+        incident_id=entry.incident_id, detail=entry.detail,
+    ) for entry in entries]
 
 
 @router.get("/metrics", dependencies=[Depends(require_admin_token)])
 def get_metrics(session: DatabaseSession) -> Metrics:
+    expire_due_blocks(session)
     events = session.scalar(select(func.count()).select_from(SecurityEvent))
     incidents = session.scalar(select(func.count()).select_from(Incident))
-    blocks = session.scalar(select(func.count()).select_from(Block))
-    return Metrics(events=events, incidents=incidents, alerts=incidents, verified_blocks=blocks)
+    verified = session.scalar(select(func.count()).select_from(Block).where(Block.verified_at.is_not(None)))
+    active = session.scalar(select(func.count()).select_from(Block).where(
+        Block.status == "active", Block.expires_at > utc_now()
+    ))
+    restored = session.scalar(select(func.count()).select_from(Block).where(Block.restored_at.is_not(None)))
+    return Metrics(
+        events=events, incidents=incidents, alerts=incidents, verified_blocks=verified,
+        active_blocks=active, restored_access=restored,
+    )
+
+
+@router.get("/system/status", dependencies=[Depends(require_admin_token)])
+@router.get("/system", dependencies=[Depends(require_admin_token)])
+def get_system(request: Request) -> dict:
+    settings = request.app.state.settings
+    return {
+        "ai_enabled": settings.ai_enabled, "ai_model": settings.ai_model,
+        "auto_containment": settings.auto_containment,
+        "medium_threshold": settings.medium_threshold, "high_threshold": settings.high_threshold,
+        "window_seconds": settings.window.total_seconds(),
+        "block_seconds": settings.block_duration.total_seconds(),
+        "lab_cidrs": [str(network) for network in settings.lab_networks],
+        "allowlist": [str(network) for network in settings.allowlist],
+        "max_active_blocks": settings.max_active_blocks,
+        "protected_app_url": settings.protected_app_url,
+    }

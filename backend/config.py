@@ -34,6 +34,9 @@ class Settings:
     ai_api_key: str = ""
     ai_model: str = "openai/gpt-oss-20b"
     ai_min_confidence: float = 0.8
+    ai_timeout_seconds: float = 10
+    max_active_blocks: int = 20
+    protected_app_url: str = "http://127.0.0.1:8001"
 
     def __post_init__(self) -> None:
         if not self.ingest_token.strip() or not self.admin_token.strip():
@@ -46,6 +49,12 @@ class Settings:
             raise ValueError("BLOCK_SECONDS debe ser mayor que 0")
         if self.ai_enabled and not self.ai_api_key.strip():
             raise ValueError("Configura AI_API_KEY para usar AI_ENABLED=true")
+        if not 0 <= self.ai_min_confidence <= 1:
+            raise ValueError("AI_MIN_CONFIDENCE debe estar entre 0 y 1")
+        if not 0 < self.ai_timeout_seconds <= 30:
+            raise ValueError("AI_TIMEOUT_SECONDS debe estar entre 0 y 30")
+        if not 1 <= self.max_active_blocks <= 20:
+            raise ValueError("MAX_ACTIVE_BLOCKS debe estar entre 1 y 20")
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -65,4 +74,7 @@ class Settings:
             ai_api_key=os.getenv("AI_API_KEY", ""),
             ai_model=os.getenv("AI_MODEL", cls.ai_model),
             ai_min_confidence=float(os.getenv("AI_MIN_CONFIDENCE", "0.8")),
+            ai_timeout_seconds=float(os.getenv("AI_TIMEOUT_SECONDS", "10")),
+            max_active_blocks=int(os.getenv("MAX_ACTIVE_BLOCKS", "20")),
+            protected_app_url=os.getenv("PROTECTED_APP_PUBLIC_URL", cls.protected_app_url),
         )

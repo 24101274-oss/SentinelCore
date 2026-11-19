@@ -13,6 +13,7 @@ class Incident(Base):
     __table_args__ = (Index("incident_scope_time", "source_ip", "target", "last_seen"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    category: Mapped[str] = mapped_column(String(40), default="possible_brute_force", server_default="possible_brute_force")
     source_ip: Mapped[str] = mapped_column(String(45))
     target: Mapped[str] = mapped_column(String(100))
     severity: Mapped[str] = mapped_column(String(6))
@@ -23,6 +24,7 @@ class Incident(Base):
     attempts: Mapped[int] = mapped_column(Integer)
     recommended_action: Mapped[str] = mapped_column(String(20))
     reason: Mapped[str] = mapped_column(String(300))
+    ai_started_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class SecurityEvent(Base):
@@ -51,6 +53,20 @@ class Block(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime)
     expires_at: Mapped[datetime] = mapped_column(DateTime)
     released_at: Mapped[datetime | None] = mapped_column(DateTime)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime)
+    restored_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class AccessObservation(Base):
+    __tablename__ = "access_observations"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    source_ip: Mapped[str] = mapped_column(String(45))
+    target: Mapped[str] = mapped_column(String(100))
+    http_status: Mapped[int] = mapped_column(Integer)
+    block_id: Mapped[str | None] = mapped_column(ForeignKey("blocks.id"))
+    observed_at: Mapped[datetime] = mapped_column(DateTime)
+    result: Mapped[dict] = mapped_column(JSON)
 
 
 class AuditEntry(Base):

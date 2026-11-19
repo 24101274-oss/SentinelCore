@@ -1,0 +1,212 @@
+:root {
+  font-family:Inter,system-ui,sans-serif;
+  color:#e7edf5;
+  background:#09121f;
+  color-scheme:dark;
+  font-size:16px
+}
+
+* {
+  box-sizing:border-box
+}
+
+body {
+  margin:0
+}
+
+main {
+  max-width:680px;
+  margin:0 auto;
+  padding:32px 20px 48px
+}
+
+header {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  margin-bottom:36px
+}
+
+.brand {
+  font-weight:800;
+  letter-spacing:.1em;
+  font-size:14px;
+  color:#70dfbe
+}
+
+.badge {
+  border:1px solid #315947;
+  border-radius:30px;
+  padding:5px 11px;
+  font-size:12px;
+  color:#b3dbca
+}
+
+h1 {
+  font-size:36px;
+  line-height:1.12;
+  margin:0 0 12px;
+  letter-spacing:-.04em
+}
+
+h2 {
+  font-size:18px;
+  margin:0 0 16px
+}
+
+.intro,section>p,footer {
+  color:#9eacbd;
+  line-height:1.6
+}
+
+.intro {
+  margin-bottom:26px
+}
+
+section {
+  border:1px solid #253348;
+  background:#111e2f;
+  border-radius:16px;
+  padding:24px;
+  margin-bottom:18px
+}
+
+.access-panel {
+  border-color:#315947
+}
+
+.status {
+  font-weight:700;
+  color:#c4ceda!important
+}
+
+.status.ok {
+  color:#70dfbe!important
+}
+
+.status.blocked {
+  color:#ff9f8d!important
+}
+
+.status.unavailable {
+  color:#efd08c!important
+}
+
+dl {
+  margin:20px 0
+}
+
+dl div {
+  display:flex;
+  justify-content:space-between;
+  gap:20px;
+  padding:10px 0;
+  border-bottom:1px solid #253348
+}
+
+dt {
+  color:#9eacbd
+}
+
+dd {
+  margin:0;
+  overflow-wrap:anywhere;
+  text-align:right
+}
+
+button {
+  background:#71e0bd;
+  border:0;
+  border-radius:9px;
+  color:#071a18;
+  min-height:46px;
+  padding:12px 17px;
+  font:inherit;
+  font-weight:700;
+  cursor:pointer
+}
+
+button:disabled {
+  opacity:.5;
+  cursor:wait
+}
+
+.secondary {
+  background:#233751;
+  color:#e7edf5;
+  border:1px solid #3b526e
+}
+
+.secondary + .secondary {
+  margin-top:10px
+}
+
+form {
+  display:grid;
+  gap:9px
+}
+
+label {
+  font-size:14px;
+  color:#c7d0dd
+}
+
+input {
+  width:100%;
+  min-height:45px;
+  border:1px solid #3b4a60;
+  border-radius:8px;
+  background:#0b1727;
+  padding:10px 12px;
+  font:inherit;
+  color:#fff;
+  margin-bottom:7px
+}
+
+input:focus,button:focus-visible {
+  outline:2px solid #71e0bd;
+  outline-offset:3px
+}
+
+form button {
+  margin-top:6px
+}
+
+#login-result {
+  margin-bottom:0
+}
+
+ol {
+  padding-left:24px;
+  margin-bottom:0
+}
+
+li {
+  padding:6px 0;
+  font-size:14px;
+  color:#c7d0dd;
+  line-height:1.5
+}
+
+footer {
+  font-size:12px;
+  margin-top:24px
+}
+
+@media(max-width:450px) {
+  main {
+    padding:24px 15px 36px
+  }
+  h1 {
+    font-size:31px
+  }
+  section {
+    padding:20px
+  }
+  button {
+    width:100%
+  }
+  .brand {
+    font-size:12px
+  }
+}

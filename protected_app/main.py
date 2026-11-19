@@ -5,12 +5,16 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from hashlib import sha256
+from ipaddress import ip_address
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from starlette.concurrency import run_in_threadpool
 
 from monitoring.agent import EventAgent, EventDeliveryError
 from monitoring.event_collector import failed_login_event
@@ -54,6 +58,36 @@ class LoginRequest(BaseModel):
 app = FastAPI(title="Laboratorio protegido de SentinelCore", lifespan=lifespan)
 
 
+@app.middleware("http")
+async def enforce_access(request: Request, call_next):
+    if request.url.path not in {"/access", "/login"}:
+        return await call_next(request)
+
+    try:
+        source_ip = str(ip_address(request.client.host if request.client else ""))
+        request.state.source_ip = source_ip
+        agent = request.app.state.events
+        decision = await run_in_threadpool(agent.check_access, source_ip)
+        if decision["blocked"]:
+            await run_in_threadpool(agent.observe_access, source_ip, 403, decision["block_id"])
+            return JSONResponse(status_code=403, content={
+                "detail": "Acceso bloqueado temporalmente por SentinelCore",
+                "status": "blocked", "source_ip": source_ip, "target": "servidor-web",
+                "expires_at": decision.get("expires_at"),
+            })
+
+        response = await call_next(request)
+        if request.url.path == "/access" and response.status_code == 200:
+            await run_in_threadpool(agent.observe_access, source_ip, 200, None)
+        return response
+    except (ValueError, EventDeliveryError):
+        logger.warning("El laboratorio no pudo confirmar la política o registrar el acceso")
+        return JSONResponse(status_code=503, content={
+            "detail": "Servicio de protección no disponible. Reintenta cuando se restablezca.",
+            "status": "unavailable",
+        })
+
+
 @app.exception_handler(RequestValidationError)
 async def invalid_request(_request: Request, _error: RequestValidationError):
     return JSONResponse(status_code=422, content={"detail": "Datos de inicio de sesión inválidos"})
@@ -62,6 +96,11 @@ async def invalid_request(_request: Request, _error: RequestValidationError):
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/access")
+def access(request: Request):
+    return {"status": "accessible", "source_ip": request.state.source_ip, "target": "servidor-web"}
 
 
 @app.post("/login")
@@ -74,7 +113,7 @@ def login(body: LoginRequest, request: Request):
         return {"status": "authenticated"}
 
     try:
-        source_ip = request.client.host if request.client else ""
+        source_ip = request.state.source_ip
         event = failed_login_event(source_ip, body.username)
         settings.events.send(event)
     except (ValueError, EventDeliveryError):
@@ -82,6 +121,9 @@ def login(body: LoginRequest, request: Request):
         raise HTTPException(status_code=503, detail="Ingesta de eventos no disponible") from None
 
     raise HTTPException(status_code=401, detail="Credenciales inválidas")
+
+
+app.mount("/", StaticFiles(directory=Path(__file__).parent / "web", html=True), name="laboratorio")
 
 
 if __name__ == "__main__":
