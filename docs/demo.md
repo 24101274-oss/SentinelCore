@@ -8,7 +8,7 @@ Preparado para la presentación del 20 de noviembre de 2026. Usa la PC como serv
 2. **Prueba controlada.** «Enviamos solicitudes de login con credenciales inválidas. Cada respuesta proviene del servidor y cada fallo se registra con la IP y la hora».
 3. **Detección.** «SentinelCore agrupa eventos por origen y servicio dentro de 60 segundos. Tres fallos generan alerta y cinco elevan el riesgo».
 4. **Contención.** «La política autoriza un bloqueo temporal para este origen. Una nueva solicitud recibe HTTP 403 y el servicio informa esa evidencia al backend».
-5. **Explicación.** Abre el incidente y la auditoría. Si existe una decisión del proveedor de IA, muestra su actor y explicación. Con IA desactivada explica la regla que disparó la contención.
+5. **Explicación.** Abre el incidente y la auditoría. Si existe una entrada `ai_decision` del actor `ai`, muestra su decisión y explicación. Con IA desactivada identifica `block_created` del actor `system` y el detalle de la regla. Ante un fallo del proveedor, muestra también `ai_fallback` y el resultado posterior.
 6. **Recuperación.** Libera el bloqueo desde el panel. En el segundo dispositivo pulsa **Probar acceso** y muestra HTTP 200 y la evidencia de recuperación.
    Descarga el JSON del incidente con **Descargar evidencia**. Reúne eventos, bloqueos y auditoría, junto con los parámetros públicos actuales al exportar.
 7. **Segundo patrón.** Tras una ventana limpia, ejecuta la prueba de varios usuarios y muestra la categoría de password spraying.
@@ -25,7 +25,8 @@ Con el analista habilitado, la decisión puede llegar después de terminar la ta
 | HTTP 403 y verificación del bloqueo | La aplicación protegida ejecutó el rechazo. |
 | Auditoría de liberación | La administración retiró la medida. |
 | HTTP 200 y recuperación verificada | El cliente volvió a obtener acceso. |
-| Actor `ai` con decisión | Se utilizó el analista configurado. |
-| Actor `system` | Se ejecutó la regla del backend. |
+| Actor `ai`, acción `ai_decision` y su detalle | El analista configurado devolvió la decisión registrada. |
+| Actor `system`, acción `block_created` y detalle de la regla | El backend aplicó la contención por reglas. |
+| Actor `system`, acción `ai_fallback` y acción posterior | Falló el análisis externo y el backend reevaluó la regla y la política. |
 
 Los resultados y tiempos que presentes deben salir de la ejecución observada. La demo cubre esta aplicación y los dos patrones de autenticación implementados. Prueba la conexión desde el segundo dispositivo antes de comenzar la exposición.
