@@ -6,7 +6,7 @@ from uuid import UUID
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StrictBool, field_validator
 
 Severity = Literal["low", "medium", "high"]
-IncidentStatus = Literal["alert", "pending_containment", "review"]
+IncidentStatus = Literal["alert", "pending_containment", "review", "contained"]
 RecommendedAction = Literal["review", "temporary_block"]
 
 

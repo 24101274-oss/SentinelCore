@@ -1,10 +1,11 @@
-from datetime import UTC
+from datetime import UTC, datetime
 from secrets import compare_digest
 from typing import Annotated
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
@@ -19,8 +20,9 @@ from backend.api.schemas import (
     Metrics,
     Severity,
 )
+from backend.containment import expire_blocks, find_active_block, record_audit, utc_now
 from backend.detection import correlate
-from backend.models import Incident, SecurityEvent
+from backend.models import AuditEntry, Block, Incident, SecurityEvent
 
 router = APIRouter(prefix="/api")
 bearer = HTTPBearer(auto_error=False)
@@ -156,8 +158,113 @@ def get_incident(incident_id: UUID, session: DatabaseSession) -> IncidentDetail:
     )
 
 
+class BlockStatus(BaseModel):
+    blocked: bool
+    expires_at: datetime | None = None
+
+
+class BlockItem(BaseModel):
+    id: str
+    incident_id: str
+    source_ip: str
+    target: str
+    status: str
+    created_at: datetime
+    expires_at: datetime
+    released_at: datetime | None = None
+
+
+class AuditItem(BaseModel):
+    id: str
+    timestamp: datetime
+    actor: str
+    action: str
+    source_ip: str
+    target: str
+    incident_id: str | None = None
+    detail: str
+
+
+def serialize_block(block: Block) -> BlockItem:
+    return BlockItem(
+        id=block.id,
+        incident_id=block.incident_id,
+        source_ip=block.source_ip,
+        target=block.target,
+        status=block.status,
+        created_at=block.created_at.replace(tzinfo=UTC),
+        expires_at=block.expires_at.replace(tzinfo=UTC),
+        released_at=block.released_at.replace(tzinfo=UTC) if block.released_at else None,
+    )
+
+
+@router.get("/blocks/check", dependencies=[Depends(require_ingest_token)])
+def check_block(source_ip: str, target: str, session: DatabaseSession) -> BlockStatus:
+    """La app protegida pregunta aquí si una IP está bloqueada antes de revisar el login."""
+    session.execute(text("BEGIN IMMEDIATE"))
+    block = find_active_block(session, source_ip, target)
+    if block is None:
+        result = BlockStatus(blocked=False)
+    else:
+        result = BlockStatus(blocked=True, expires_at=block.expires_at.replace(tzinfo=UTC))
+    session.commit()
+    return result
+
+
+@router.get("/blocks", dependencies=[Depends(require_admin_token)])
+def list_blocks(session: DatabaseSession, active_only: bool = False) -> list[BlockItem]:
+    session.execute(text("BEGIN IMMEDIATE"))
+    expire_blocks(session)
+    query = select(Block)
+    if active_only:
+        query = query.where(Block.status == "active")
+    result = [serialize_block(b) for b in session.scalars(query.order_by(Block.created_at.desc()).limit(100))]
+    session.commit()
+    return result
+
+
+@router.post("/blocks/{block_id}/release", dependencies=[Depends(require_admin_token)])
+def release_block(block_id: UUID, session: DatabaseSession) -> BlockItem:
+    session.execute(text("BEGIN IMMEDIATE"))
+    block = session.get(Block, str(block_id))
+    if block is None:
+        raise HTTPException(status_code=404, detail="Bloqueo no encontrado")
+    if block.status != "active":
+        raise HTTPException(status_code=409, detail="El bloqueo ya no está activo")
+    block.status = "released"
+    block.released_at = utc_now()
+    record_audit(
+        session, "admin", "block_released", block.source_ip, block.target,
+        block.incident_id, "Un administrador liberó el bloqueo manualmente.",
+    )
+    result = serialize_block(block)
+    session.commit()
+    return result
+
+
+@router.get("/audit", dependencies=[Depends(require_admin_token)])
+def list_audit(
+    session: DatabaseSession, limit: Annotated[int, Query(ge=1, le=200)] = 50
+) -> list[AuditItem]:
+    entries = session.scalars(select(AuditEntry).order_by(AuditEntry.timestamp.desc()).limit(limit))
+    return [
+        AuditItem(
+            id=e.id,
+            timestamp=e.timestamp.replace(tzinfo=UTC),
+            actor=e.actor,
+            action=e.action,
+            source_ip=e.source_ip,
+            target=e.target,
+            incident_id=e.incident_id,
+            detail=e.detail,
+        )
+        for e in entries
+    ]
+
+
 @router.get("/metrics", dependencies=[Depends(require_admin_token)])
 def get_metrics(session: DatabaseSession) -> Metrics:
     events = session.scalar(select(func.count()).select_from(SecurityEvent))
     incidents = session.scalar(select(func.count()).select_from(Incident))
-    return Metrics(events=events, incidents=incidents, alerts=incidents, verified_blocks=0)
+    blocks = session.scalar(select(func.count()).select_from(Block))
+    return Metrics(events=events, incidents=incidents, alerts=incidents, verified_blocks=blocks)

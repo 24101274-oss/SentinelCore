@@ -39,3 +39,28 @@ class SecurityEvent(Base):
     # El incidente del recibo original no cambia si aparecen más evidencias.
     receipt_incident_id: Mapped[str | None] = mapped_column(ForeignKey("incidents.id"))
     incident_id: Mapped[str | None] = mapped_column(ForeignKey("incidents.id"), index=True)
+class Block(Base):
+    __tablename__ = "blocks"
+    __table_args__ = (Index("block_lookup", "source_ip", "target", "status"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    incident_id: Mapped[str] = mapped_column(ForeignKey("incidents.id"), index=True)
+    source_ip: Mapped[str] = mapped_column(String(45))
+    target: Mapped[str] = mapped_column(String(100))
+    status: Mapped[str] = mapped_column(String(10))  # active, expired, released
+    created_at: Mapped[datetime] = mapped_column(DateTime)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    released_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class AuditEntry(Base):
+    __tablename__ = "audit_log"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime)
+    actor: Mapped[str] = mapped_column(String(30))  # system, admin
+    action: Mapped[str] = mapped_column(String(30))  # block_created, block_expired, block_released
+    source_ip: Mapped[str] = mapped_column(String(45))
+    target: Mapped[str] = mapped_column(String(100))
+    incident_id: Mapped[str | None] = mapped_column(ForeignKey("incidents.id"))
+    detail: Mapped[str] = mapped_column(String(300))

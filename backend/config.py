@@ -27,6 +27,8 @@ class Settings:
     high_threshold: int = 5
     allowlist: tuple[Network, ...] = ()
     lab_networks: tuple[Network, ...] = ()
+    auto_containment: bool = True
+    block_duration: timedelta = timedelta(minutes=10)
 
     def __post_init__(self) -> None:
         if not self.ingest_token.strip() or not self.admin_token.strip():
@@ -35,6 +37,8 @@ class Settings:
             raise ValueError("INGEST_TOKEN y ADMIN_TOKEN deben ser distintos")
         if self.window <= timedelta(0) or not 0 < self.medium_threshold < self.high_threshold:
             raise ValueError("Se requiere WINDOW_SECONDS > 0 y 0 < MEDIUM_THRESHOLD < HIGH_THRESHOLD")
+        if self.block_duration <= timedelta(0):
+            raise ValueError("BLOCK_SECONDS debe ser mayor que 0")
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -47,4 +51,6 @@ class Settings:
             high_threshold=int(os.getenv("HIGH_THRESHOLD", "5")),
             allowlist=read_networks("ALLOWLIST"),
             lab_networks=read_networks("LAB_CIDRS"),
+            auto_containment=os.getenv("AUTO_CONTAINMENT", "true").strip().lower() in ("1", "true", "yes", "on"),
+            block_duration=timedelta(seconds=int(os.getenv("BLOCK_SECONDS", "600"))),
         )
