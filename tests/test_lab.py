@@ -38,7 +38,7 @@ def request(port, method, route, body=None, headers=None):
 class LabIntegrationTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        directory = tempfile.TemporaryDirectory(dir=ROOT)
+        directory = tempfile.TemporaryDirectory(dir=ROOT, ignore_cleanup_errors=True)
         cls.addClassCleanup(directory.cleanup)
         cls.ingest = {"Authorization": f"Bearer {secrets.token_urlsafe(24)}"}
         cls.admin = {"Authorization": f"Bearer {secrets.token_urlsafe(24)}"}
@@ -76,9 +76,18 @@ class LabIntegrationTest(unittest.TestCase):
 
     @staticmethod
     def stop(process):
-        if process.poll() is None:
+        if process.poll() is not None:
+            return
+        if sys.platform == "win32":
+            subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                           capture_output=True)
+        else:
             process.terminate()
+        try:
             process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
 
     def test_failures_create_and_upgrade_one_incident(self):
         _, baseline = request(18060, "GET", "/api/metrics", headers=self.admin)
@@ -103,7 +112,7 @@ class LabIntegrationTest(unittest.TestCase):
         _, metrics = request(18060, "GET", "/api/metrics", headers=self.admin)
         self.assertEqual(metrics["events"], baseline["events"] + 6)
         self.assertEqual(metrics["incidents"], baseline["incidents"] + 1)
-        self.assertEqual(metrics["verified_blocks"], 0)
+        self.assertEqual(metrics["verified_blocks"], baseline["verified_blocks"])
         self.assertEqual(request(18061, "POST", "/login", {"username": "admin", "password": self.password})[0], 200)
         self.assertEqual(request(18060, "GET", "/api/metrics", headers=self.admin)[1], metrics)
 
@@ -137,7 +146,33 @@ class LabIntegrationTest(unittest.TestCase):
                 self.assertEqual(receipt["severity"], "high")
                 _, incident = request(18060, "GET", f"/api/incidents/{receipt['incident_id']}", headers=self.admin)
                 self.assertEqual((incident["event_count"], incident["status"]), (5, expected))
+    def test_containment_blocks_and_releases(self):
+        now = datetime.now(UTC)
+        source_ip = "10.231.37.7"
+        for delay in [4, 3, 2, 1, 0]:
+            body = {
+                "event_type": "failed_login", "source_ip": source_ip, "target": "servidor-web",
+                "timestamp": (now - timedelta(seconds=delay)).isoformat(),
+                "metadata": {"username": "admin", "success": False},
+            }
+            status, receipt = request(18060, "POST", "/api/events", body, self.ingest)
+            self.assertEqual(status, 201)
 
+        check = f"/api/blocks/check?source_ip={source_ip}&target=servidor-web"
+        self.assertTrue(request(18060, "GET", check, headers=self.ingest)[1]["blocked"])
+        _, incident = request(18060, "GET", f"/api/incidents/{receipt['incident_id']}", headers=self.admin)
+        self.assertEqual(incident["status"], "contained")
+
+        _, blocks = request(18060, "GET", "/api/blocks?active_only=true", headers=self.admin)
+        block = next(item for item in blocks if item["source_ip"] == source_ip)
+        status, released = request(18060, "POST", f"/api/blocks/{block['id']}/release", headers=self.admin)
+        self.assertEqual((status, released["status"]), (200, "released"))
+        self.assertFalse(request(18060, "GET", check, headers=self.ingest)[1]["blocked"])
+
+        _, audit = request(18060, "GET", "/api/audit", headers=self.admin)
+        actions = [entry["action"] for entry in audit if entry["source_ip"] == source_ip]
+        self.assertIn("block_created", actions)
+        self.assertIn("block_released", actions)
     def test_dashboard_assets(self):
         for asset in ("", "dashboard.css", "dashboard.js"):
             status, content = request(18060, "GET", f"/dashboard/{asset}")
