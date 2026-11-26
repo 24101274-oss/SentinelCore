@@ -193,6 +193,115 @@ footer {
   margin-top:24px
 }
 
+.demo-progress {
+  position:relative;
+  height:9px;
+  margin:18px 0 6px;
+  border:1px solid #253348;
+  border-radius:99px;
+  background:#0b1727;
+  overflow:hidden
+}
+
+.demo-progress span {
+  display:block;
+  height:100%;
+  width:0;
+  border-radius:99px;
+  background:linear-gradient(90deg,#71e0bd,#f2c75c);
+  transition:width .3s ease
+}
+
+.demo-progress[data-state="blocked"] span {
+  background:linear-gradient(90deg,#ff9f8d,#ff6b6b)
+}
+
+.demo-progress[data-state="done"] span {
+  background:linear-gradient(90deg,#71e0bd,#a8f0d8)
+}
+
+.demo-counter {
+  margin:0 0 12px;
+  font-size:13px;
+  color:#9eacbd
+}
+
+#demo-results li {
+  padding-left:10px;
+  border-left:3px solid #3b526e;
+  animation:rowIn .35s ease both
+}
+
+#demo-results li[data-code="401"] {
+  border-left-color:#efd08c
+}
+
+#demo-results li[data-code="403"] {
+  border-left-color:#ff9f8d;
+  color:#ffc4bb
+}
+
+#demo-results li[data-code="200"] {
+  border-left-color:#71e0bd
+}
+
+.access-panel {
+  position:relative;
+  overflow:hidden
+}
+
+.access-panel::after {
+  content:"";
+  position:absolute;
+  left:0;
+  right:0;
+  top:0;
+  height:2px;
+  background:linear-gradient(90deg,transparent,#71e0bd99,transparent);
+  animation:scan 3.6s linear infinite;
+  pointer-events:none
+}
+
+.status.blocked {
+  animation:blockedPulse 1.6s ease-in-out infinite
+}
+
+body.running header .badge {
+  color:#ffc9c0;
+  border-color:#7a3a34;
+  animation:badgePulse 1.2s ease-in-out infinite
+}
+
+@keyframes rowIn {
+  from { opacity:0; transform:translateX(-8px) }
+  to { opacity:1; transform:none }
+}
+
+@keyframes scan {
+  0% { transform:translateY(0); opacity:0 }
+  10% { opacity:.8 }
+  90% { opacity:.6 }
+  100% { transform:translateY(320px); opacity:0 }
+}
+
+@keyframes blockedPulse {
+  0%,100% { text-shadow:0 0 0 transparent }
+  50% { text-shadow:0 0 12px #ff9f8d99 }
+}
+
+@keyframes badgePulse {
+  0%,100% { box-shadow:0 0 0 0 #ff9f8d00 }
+  50% { box-shadow:0 0 0 4px #ff9f8d26 }
+}
+
+@media (prefers-reduced-motion:reduce) {
+  *,*::before,*::after {
+    animation-duration:.001ms!important;
+    animation-iteration-count:1!important;
+    transition-duration:.001ms!important
+  }
+}
+
 @media(max-width:450px) {
   main {
     padding:24px 15px 36px

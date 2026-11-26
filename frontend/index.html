@@ -12,9 +12,12 @@
     <header class="topbar">
       <div class="shell topbar-inner">
         <a class="brand" href="./"><span class="brand-mark" aria-hidden="true">S</span>Sentinel<span>Core</span></a>
-        <div class="connection">
-          <span id="connection-state" class="connection-state" data-state="offline">Desconectado</span>
-          <button id="disconnect" class="button button-secondary" type="button" hidden>Desconectar</button>
+        <div class="topbar-meta">
+          <time id="clock" class="clock" aria-label="Hora actual">—</time>
+          <div class="connection">
+            <span id="connection-state" class="connection-state" data-state="offline">Desconectado</span>
+            <button id="disconnect" class="button button-secondary" type="button" hidden>Desconectar</button>
+          </div>
         </div>
       </div>
     </header>
@@ -39,7 +42,7 @@
           <div>
             <p class="eyebrow">LABORATORIO DE SEGURIDAD</p>
             <h1 id="workspace-title" tabindex="-1">Centro de operaciones</h1>
-            <p class="last-update">Última actualización <time id="updated">—</time> · Actualización automática cada 8 s</p>
+            <p class="last-update">Última actualización <time id="updated">—</time> · Actualización automática cada 8 s · <span class="live-tag">EN VIVO</span></p>
           </div>
           <div class="workspace-actions">
             <a id="lab-link" class="button button-secondary" href="#" target="_blank" rel="noopener noreferrer">Abrir laboratorio ↗</a>
@@ -47,6 +50,32 @@
           </div>
         </div>
         <p id="refresh-error" class="error banner" role="alert" hidden></p>
+
+        <section class="overview" aria-label="Panorama de amenaza">
+          <div id="threat" class="panel threat" data-level="calm" aria-live="polite">
+            <div class="threat-pulse" aria-hidden="true"><span></span></div>
+            <div class="threat-copy">
+              <p class="threat-label">Estado de amenaza · en vivo</p>
+              <p id="threat-state" class="threat-state">Sistema en calma</p>
+              <p id="threat-detail" class="threat-detail">Sin incidentes registrados. El laboratorio está preparado.</p>
+            </div>
+            <dl class="threat-stats">
+              <div><dt>Riesgo alto</dt><dd id="threat-high">0</dd></div>
+              <div><dt>Bloqueos activos</dt><dd id="threat-blocks">0</dd></div>
+              <div><dt>Última actividad</dt><dd id="threat-last" class="threat-last">—</dd></div>
+            </dl>
+          </div>
+          <div class="panel risk-card" aria-label="Distribución de riesgo">
+            <div id="risk-donut" class="donut" role="img" aria-label="Distribución de incidentes por riesgo">
+              <div class="donut-center"><strong id="risk-total">0</strong><span>incidentes</span></div>
+            </div>
+            <ul class="risk-legend">
+              <li><span class="dot" data-risk="high"></span>Alto <b id="risk-high">0</b></li>
+              <li><span class="dot" data-risk="medium"></span>Medio <b id="risk-medium">0</b></li>
+              <li><span class="dot" data-risk="low"></span>Bajo <b id="risk-low">0</b></li>
+            </ul>
+          </div>
+        </section>
 
         <dl class="metrics" aria-label="Métricas del laboratorio">
           <div class="panel metric"><dt>Eventos</dt><dd id="metric-events">—</dd></div>
