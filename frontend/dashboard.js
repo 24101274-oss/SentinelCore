@@ -31,7 +31,9 @@ const auditActions = {
 const actors = { admin: "Administrador", system: "Sistema", ai: "Analista IA", protected_app: "Servicio protegido" };
 const numberFormat = new Intl.NumberFormat("es-PE");
 const dateFormat = new Intl.DateTimeFormat("es-PE", { dateStyle: "medium", timeStyle: "medium" });
+const clockFormat = new Intl.DateTimeFormat("es-PE", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 const refreshIntervalMs = 8000;
+const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 let session;
 
 function node(tag, value, className) {
@@ -44,6 +46,65 @@ function node(tag, value, className) {
 function formatTime(value) {
   const date = new Date(value);
   return value && !Number.isNaN(date.getTime()) ? dateFormat.format(date) : "—";
+}
+
+function relativeTime(value) {
+  const date = new Date(value);
+  if (!value || Number.isNaN(date.getTime())) return "—";
+  const seconds = Math.round((Date.now() - date.getTime()) / 1000);
+  if (seconds < 5) return "ahora mismo";
+  if (seconds < 60) return `hace ${seconds} s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `hace ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `hace ${hours} h`;
+  return dateFormat.format(date);
+}
+
+function setRelativeTime(target, value) {
+  target.dataset.relativeTs = value ?? "";
+  target.textContent = value ? relativeTime(value) : "—";
+  if (target.tagName === "TIME") target.dateTime = value ?? "";
+  target.title = value ? formatTime(value) : "";
+}
+
+function updateRelativeTimes() {
+  for (const target of document.querySelectorAll("[data-relative-ts]")) {
+    const value = target.dataset.relativeTs;
+    if (value) target.textContent = relativeTime(value);
+  }
+}
+
+function track(activeSession, name) {
+  if (!activeSession[name]) activeSession[name] = { seen: new Set(), primed: false };
+  return activeSession[name];
+}
+
+function isNewEntry(tracker, key, target) {
+  const fresh = tracker.primed && !tracker.seen.has(key);
+  tracker.seen.add(key);
+  if (fresh) target.classList.add("flash");
+  return fresh;
+}
+
+function animateMetric(id, value) {
+  const target = element(id);
+  const goal = Number(value) || 0;
+  const start = Number(target.dataset.value ?? "0");
+  target.dataset.value = String(goal);
+  if (reduceMotion || start === goal) {
+    target.textContent = numberFormat.format(goal);
+    return;
+  }
+  const began = performance.now();
+  const duration = 700;
+  function frame(now) {
+    const progress = Math.min(1, (now - began) / duration);
+    const eased = 1 - Math.pow(1 - progress, 3);
+    target.textContent = numberFormat.format(Math.round(start + (goal - start) * eased));
+    if (progress < 1) requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
 }
 
 function displayConnection(state, label) {
@@ -127,6 +188,7 @@ function renderIncidents(data, activeSession) {
   const rows = element("incident-rows");
   const previouslyFocused = rows.contains(document.activeElement) ? document.activeElement.dataset.incident : undefined;
   const fragment = document.createDocumentFragment();
+  const tracker = track(activeSession, "incidentTracker");
 
   for (const incident of data.items) {
     const row = document.createElement("tr");
@@ -145,9 +207,11 @@ function renderIncidents(data, activeSession) {
     riskCell.append(riskBadge(incident.severity));
     statusCell.append(statusBadge(incident.status));
     row.append(idCell, riskCell, statusCell, node("td", formatTime(incident.last_seen), "cell-date mono"));
+    isNewEntry(tracker, `${incident.id}|${incident.event_count}|${incident.status}`, row);
     fragment.append(row);
   }
 
+  tracker.primed = true;
   rows.replaceChildren(fragment);
   highlightSelection(activeSession);
   if (previouslyFocused) {
@@ -218,6 +282,7 @@ function renderBlocks(blocks, activeSession) {
   }
   activeSession.blocks = blocks;
   const fragment = document.createDocumentFragment();
+  const tracker = track(activeSession, "blockTracker");
   for (const block of blocks) {
     const row = document.createElement("tr");
     const source = node("td", block.source_ip, "mono");
@@ -254,8 +319,10 @@ function renderBlocks(blocks, activeSession) {
       action.append(node("span", block.restored_at ? "Comprobado" : "Pendiente de comprobación", "cell-subtitle"));
     }
     row.append(source, status, node("td", formatTime(block.expires_at), "cell-date mono"), proof, action);
+    isNewEntry(tracker, `${block.id}|${block.status}|${block.verified_at ?? ""}|${block.restored_at ?? ""}`, row);
     fragment.append(row);
   }
+  tracker.primed = true;
   element("block-rows").replaceChildren(fragment);
   element("blocks-empty").hidden = blocks.length > 0;
   element("blocks-table").hidden = blocks.length === 0;
@@ -266,22 +333,74 @@ function renderBlocks(blocks, activeSession) {
   }
 }
 
-function renderAudit(entries) {
+function renderAudit(entries, activeSession) {
   const fragment = document.createDocumentFragment();
+  const tracker = track(activeSession, "auditTracker");
   for (const entry of entries) {
     const item = document.createElement("li");
-    const timestamp = node("time", formatTime(entry.timestamp));
-    timestamp.dateTime = entry.timestamp;
+    const timestamp = node("time", "");
+    setRelativeTime(timestamp, entry.timestamp);
     const content = document.createElement("div");
     content.append(node("p", auditActions[entry.action] ?? entry.action, "audit-action"));
     if (entry.detail) content.append(node("p", entry.detail, "audit-detail"));
     content.append(node("p", [actors[entry.actor] ?? entry.actor, entry.source_ip, entry.incident_id].filter(Boolean).join(" · "), "audit-context mono"));
     item.append(timestamp, content);
+    isNewEntry(tracker, `${entry.timestamp}|${entry.action}|${entry.source_ip ?? ""}|${entry.incident_id ?? ""}`, item);
     fragment.append(item);
   }
+  tracker.primed = true;
   element("audit-list").replaceChildren(fragment);
   element("audit-empty").hidden = entries.length > 0;
   element("audit-count").textContent = `${numberFormat.format(entries.length)} registros recientes`;
+}
+
+function renderThreat(incidents, blocks) {
+  const items = incidents.items ?? [];
+  const high = items.filter((incident) => incident.severity === "high").length;
+  const unresolvedHigh = items.filter((incident) => incident.severity === "high" && incident.status !== "restored").length;
+  const activeBlocks = blocks.filter((block) => block.status === "active").length;
+  const last = items.reduce((latest, incident) => {
+    const time = new Date(incident.last_seen).getTime();
+    return Number.isNaN(time) ? latest : Math.max(latest, time);
+  }, 0);
+  let level = "calm";
+  let state = "Sistema en calma";
+  let detail = "Sin incidentes registrados. El laboratorio está preparado.";
+  if (activeBlocks > 0 || unresolvedHigh > 0) {
+    level = "danger";
+    state = "Amenaza activa";
+    detail = `${numberFormat.format(unresolvedHigh)} incidente(s) de riesgo alto sin resolver · ${numberFormat.format(activeBlocks)} bloqueo(s) activo(s).`;
+  } else if (items.length > 0) {
+    level = "watch";
+    state = "Vigilancia activa";
+    detail = `${numberFormat.format(items.length)} incidente(s) registrado(s), sin riesgo alto activo.`;
+  }
+  element("threat").dataset.level = level;
+  element("threat-state").textContent = state;
+  element("threat-detail").textContent = detail;
+  element("threat-high").textContent = numberFormat.format(high);
+  element("threat-blocks").textContent = numberFormat.format(activeBlocks);
+  setRelativeTime(element("threat-last"), last ? new Date(last).toISOString() : "");
+}
+
+function renderRiskDonut(incidents) {
+  const counts = { high: 0, medium: 0, low: 0 };
+  for (const incident of incidents.items ?? []) {
+    if (counts[incident.severity] !== undefined) counts[incident.severity] += 1;
+  }
+  const total = counts.high + counts.medium + counts.low;
+  element("risk-total").textContent = numberFormat.format(total);
+  element("risk-high").textContent = numberFormat.format(counts.high);
+  element("risk-medium").textContent = numberFormat.format(counts.medium);
+  element("risk-low").textContent = numberFormat.format(counts.low);
+  const donut = element("risk-donut");
+  if (total === 0) {
+    donut.style.background = "conic-gradient(#25374a 0% 100%)";
+    return;
+  }
+  const highEnd = (counts.high / total) * 100;
+  const mediumEnd = ((counts.high + counts.medium) / total) * 100;
+  donut.style.background = `conic-gradient(#ff7b7b 0% ${highEnd}%, #f2c75c ${highEnd}% ${mediumEnd}%, #64dbba ${mediumEnd}% 100%)`;
 }
 
 function blockFeedback(message, error = false) {
@@ -409,12 +528,15 @@ async function refresh(activeSession, connecting = false) {
       restored_access: "metric-restored-access",
     };
     for (const [key, id] of Object.entries(metricIds)) {
-      element(id).textContent = numberFormat.format(metrics[key]);
+      animateMetric(id, metrics[key]);
     }
     renderIncidents(incidents, activeSession);
     renderBlocks(blocks, activeSession);
-    renderAudit(audit);
+    renderAudit(audit, activeSession);
     renderSystem(system);
+    renderThreat(incidents, blocks);
+    renderRiskDonut(incidents);
+    updateRelativeTimes();
 
     const now = new Date().toISOString();
     element("updated").dateTime = now;
@@ -457,6 +579,22 @@ function disconnect(message = "") {
   element("incident-rows").replaceChildren();
   element("block-rows").replaceChildren();
   element("audit-list").replaceChildren();
+  for (const id of ["metric-events", "metric-incidents", "metric-alerts", "metric-verified-blocks", "metric-active-blocks", "metric-restored-access"]) {
+    const metric = element(id);
+    metric.dataset.value = "0";
+    metric.textContent = "—";
+  }
+  element("threat").dataset.level = "calm";
+  element("threat-state").textContent = "Sistema en calma";
+  element("threat-detail").textContent = "Sin incidentes registrados. El laboratorio está preparado.";
+  element("threat-high").textContent = "0";
+  element("threat-blocks").textContent = "0";
+  setRelativeTime(element("threat-last"), "");
+  element("risk-total").textContent = "0";
+  element("risk-high").textContent = "0";
+  element("risk-medium").textContent = "0";
+  element("risk-low").textContent = "0";
+  element("risk-donut").style.background = "conic-gradient(#25374a 0% 100%)";
   element("release-confirmation").hidden = true;
   displayMessage("block-feedback", "");
   displayMessage("export-feedback", "");
@@ -531,3 +669,14 @@ element("cancel-release").addEventListener("click", () => {
   session.pendingRelease = undefined;
   element("release-confirmation").hidden = true;
 });
+
+function tickClock() {
+  const now = new Date();
+  const clock = element("clock");
+  clock.textContent = clockFormat.format(now);
+  clock.dateTime = now.toISOString();
+}
+
+tickClock();
+setInterval(tickClock, 1000);
+setInterval(updateRelativeTimes, 1000);

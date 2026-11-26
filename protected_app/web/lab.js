@@ -6,6 +6,9 @@ const sprayingButton = document.querySelector('#run-spraying');
 const loginButton = document.querySelector('#login-button');
 const results = document.querySelector('#demo-results');
 const demoStatus = document.querySelector('#demo-status');
+const progressBar = document.querySelector('#demo-progress');
+const progressWrap = document.querySelector('#demo-progressbar');
+const demoCounter = document.querySelector('#demo-counter');
 let actionInProgress = false;
 
 async function send(path, body, timeout = 10000) {
@@ -46,6 +49,18 @@ function setActionRunning(running) {
   loginButton.disabled = running;
 }
 
+function setProgress(done, total, state) {
+  const percent = total ? Math.round((done / total) * 100) : 0;
+  if (progressBar) progressBar.style.width = `${percent}%`;
+  if (progressWrap) {
+    progressWrap.setAttribute('aria-valuenow', String(done));
+    if (state) progressWrap.dataset.state = state;
+  }
+  if (demoCounter) {
+    demoCounter.textContent = done === 0 ? 'Listo para la prueba.' : `Intento ${done} de ${total} · ${percent}%`;
+  }
+}
+
 checkButton.addEventListener('click', () => checkAccess());
 document.querySelector('#login-form').addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -71,7 +86,9 @@ document.querySelector('#login-form').addEventListener('submit', async (event) =
 async function runDemo(severalUsers) {
   if (actionInProgress) return;
   setActionRunning(true);
+  document.body.classList.add('running');
   results.replaceChildren();
+  setProgress(0, 8, 'running');
   demoStatus.textContent = 'Enviando intentos de autenticación…';
   document.querySelector('#demo-pattern').textContent = severalUsers
     ? 'Patrón de password spraying · una contraseña inválida en usuarios diferentes'
@@ -88,8 +105,10 @@ async function runDemo(severalUsers) {
       const row = document.createElement('li');
       const labels = {401: 'Credenciales inválidas registradas', 403: 'Acceso bloqueado por SentinelCore', 503: 'Protección no disponible'};
       row.textContent = `Intento ${attempt} · ${username} · HTTP ${result.code} · ${labels[result.code] || 'Respuesta recibida'}`;
+      row.dataset.code = String(result.code);
       results.append(row);
       lastCode = result.code;
+      setProgress(attempt, 8, result.code === 403 ? 'blocked' : 'running');
       if (result.code !== 401) break;
       await new Promise(resolve => setTimeout(resolve, 300));
     }
@@ -103,12 +122,15 @@ async function runDemo(severalUsers) {
         await new Promise(resolve => setTimeout(resolve, 1000));
         const remaining = deadline - Date.now();
         if (remaining <= 0) break;
+        demoStatus.textContent = `Esperando decisión… ${Math.ceil(remaining / 1000)} s`;
         access = await checkAccess(Math.min(10000, remaining));
       }
     }
     if (access?.code === 403) {
+      setProgress(8, 8, 'blocked');
       demoStatus.textContent = 'Bloqueo confirmado · HTTP 403';
     } else if (access?.code === 200) {
+      setProgress(8, 8, 'done');
       demoStatus.textContent = waitedForDecision
         ? 'Acceso disponible tras la espera · HTTP 200. Revisa la decisión en el panel.'
         : 'Acceso disponible · HTTP 200';
@@ -123,6 +145,7 @@ async function runDemo(severalUsers) {
     results.append(row);
     demoStatus.textContent = 'La prueba terminó por un problema de conexión.';
   } finally {
+    document.body.classList.remove('running');
     setActionRunning(false);
   }
 }
